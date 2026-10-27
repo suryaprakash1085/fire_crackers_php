@@ -233,6 +233,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   `description` text DEFAULT NULL,
   `safety_notes` text DEFAULT NULL,
   `aliases` text DEFAULT NULL COMMENT 'comma separated voice/search aliases incl. Tamil names',
+  `video_path` varchar(255) DEFAULT NULL,
   `original_price` decimal(10,2) NOT NULL,
   `selling_price` decimal(10,2) NOT NULL,
   `discount_percent` decimal(5,2) NOT NULL DEFAULT 0.00,

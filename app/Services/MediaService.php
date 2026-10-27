@@ -46,6 +46,31 @@ final class MediaService {
         return ['ok' => true, 'message' => 'Uploaded.', 'media' => ['id' => $id, 'path' => $path, 'filename' => $label]];
     }
 
+    private const VIDEO_MIME = ['video/mp4' => 'mp4', 'video/webm' => 'webm'];
+    private const VIDEO_MAX = 50 * 1024 * 1024;
+
+    /** Handles a product video upload (MP4/WebM, max 50 MB). Returns ['ok'=>bool,'message'=>string,'path'=>?string] */
+    public static function uploadVideo(array $f): array {
+        if (($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            $m = [UPLOAD_ERR_INI_SIZE => 'Video exceeds the server upload limit.', UPLOAD_ERR_FORM_SIZE => 'Video is too large.'][$f['error'] ?? 4] ?? 'Video upload failed.';
+            return ['ok' => false, 'message' => $m];
+        }
+        if (!is_uploaded_file($f['tmp_name'])) return ['ok' => false, 'message' => 'Invalid upload.'];
+        if (filesize($f['tmp_name']) > self::VIDEO_MAX) return ['ok' => false, 'message' => 'Video must be under 50 MB.'];
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($f['tmp_name']);
+        if (!isset(self::VIDEO_MIME[$mime])) return ['ok' => false, 'message' => 'Only MP4 or WebM videos are allowed.'];
+        $dir = 'uploads/videos/' . date('Y/m');
+        if (!is_dir(PUBLIC_PATH . '/' . $dir) && !@mkdir(PUBLIC_PATH . '/' . $dir, 0775, true)) return ['ok' => false, 'message' => 'Upload folder is not writable.'];
+        $path = $dir . '/' . bin2hex(random_bytes(12)) . '.' . self::VIDEO_MIME[$mime];
+        if (!move_uploaded_file($f['tmp_name'], PUBLIC_PATH . '/' . $path)) return ['ok' => false, 'message' => 'Could not save the video.'];
+        return ['ok' => true, 'message' => 'Uploaded.', 'path' => $path];
+    }
+    public static function deleteVideo(?string $path): void {
+        if (!$path || !str_starts_with($path, 'uploads/videos/')) return;
+        $f = PUBLIC_PATH . '/' . $path;
+        if (str_starts_with(realpath(dirname($f)) ?: '', realpath(PUBLIC_PATH . '/uploads/videos') ?: '#') && is_file($f)) @unlink($f);
+    }
+
     public static function usage(string $path): int {
         return (int)DB::val('SELECT (SELECT COUNT(*) FROM banners WHERE image=?) + (SELECT COUNT(*) FROM categories WHERE image=?) + (SELECT COUNT(*) FROM services WHERE image=?)
             + (SELECT COUNT(*) FROM product_images WHERE path=?) + (SELECT COUNT(*) FROM pages WHERE image=?) + (SELECT COUNT(*) FROM site_settings WHERE setting_key IN ("logo","favicon") AND setting_value=?)',

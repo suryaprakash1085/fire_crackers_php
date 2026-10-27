@@ -59,9 +59,17 @@ final class ProductsController extends AdminController {
             $pdo->beginTransaction();
             if ($id) { DB::update('products', $d, 'id=?', [$id]); }
             else { $d['slug'] = $slugBase; $id = DB::insert('products', $d); }
+            $errs = [];
+            // product video: replace or remove
+            $oldVideo = $id ? (string)DB::val('SELECT video_path FROM products WHERE id=?', [$id]) : '';
+            $newVideo = null; $removeVideo = !empty($_POST['remove_video']);
+            if (!empty($_FILES['video']['name']) && ($_FILES['video']['error'] ?? 4) !== UPLOAD_ERR_NO_FILE) {
+                $vr = MediaService::uploadVideo($_FILES['video']);
+                if ($vr['ok']) { $newVideo = $vr['path']; DB::exec('UPDATE products SET video_path=? WHERE id=?', [$newVideo, $id]); }
+                else $errs[] = 'Video: ' . $vr['message'];
+            } elseif ($removeVideo && $oldVideo !== '') { DB::exec('UPDATE products SET video_path=NULL WHERE id=?', [$id]); }
             foreach ($this->ids('remove_images') as $rid) DB::exec('DELETE FROM product_images WHERE id=? AND product_id=?', [$rid, $id]);
             $order = (int)DB::val('SELECT COALESCE(MAX(sort_order),0) FROM product_images WHERE product_id=?', [$id]);
-            $errs = [];
             if (!empty($_FILES['images']['name'][0])) {
                 foreach ($_FILES['images']['name'] as $k => $_) {
                     if ($_FILES['images']['error'][$k] === UPLOAD_ERR_NO_FILE) continue;
@@ -81,6 +89,7 @@ final class ProductsController extends AdminController {
                 DB::exec('UPDATE product_images SET is_primary=1 WHERE product_id=? ORDER BY sort_order, id LIMIT 1', [$id]);
             }
             $pdo->commit();
+            if (($newVideo || $removeVideo) && $oldVideo !== '') MediaService::deleteVideo($oldVideo);
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             log_error('product save: ' . $e->getMessage()); flash('error', 'Could not save the product.'); redirect($id ? "/admin/products/$id/edit" : '/admin/products/create');
@@ -94,7 +103,7 @@ final class ProductsController extends AdminController {
     public function delete(string $id): void {
         $this->post();
         if ((int)DB::val('SELECT COUNT(*) FROM order_items WHERE product_id=?', [(int)$id]) > 0) { DB::exec("UPDATE products SET status='archived' WHERE id=?", [(int)$id]); flash('info', 'This product has order history, so it was archived instead of deleted.'); }
-        else { DB::exec('DELETE FROM products WHERE id=?', [(int)$id]); flash('success', 'Product deleted.'); }
+        else { MediaService::deleteVideo((string)DB::val('SELECT video_path FROM products WHERE id=?', [(int)$id])); DB::exec('DELETE FROM products WHERE id=?', [(int)$id]); flash('success', 'Product deleted.'); }
         redirect('/admin/products');
     }
 }

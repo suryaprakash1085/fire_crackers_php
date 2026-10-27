@@ -9,3 +9,12 @@ RewriteRule ^ index.php [L]
   Header set Referrer-Policy "strict-origin-when-cross-origin"
   Header set Permissions-Policy "microphone=(self), camera=(), geolocation=()"
 </IfModule>
+
+<IfModule mod_php.c>
+  php_value upload_max_filesize 64M
+  php_value post_max_size 72M
+</IfModule>
+<IfModule mod_php8.c>
+  php_value upload_max_filesize 64M
+  php_value post_max_size 72M
+</IfModule>
