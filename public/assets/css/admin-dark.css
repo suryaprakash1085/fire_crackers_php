@@ -1,0 +1,53 @@
+/* Admin dark theme — applied when <html class="dark"> (default). Toggle in the admin top bar; choice is remembered. */
+html.dark{color-scheme:dark;--c-bg:#0B1020;--c-text:#E5E7EB;--c-text-rgb:229 231 235;--surface:#121A2E;--surface-2:#0E1527;--line:rgb(255 255 255/.09)}
+html.dark body{background:radial-gradient(1100px 500px at 85% -10%,rgb(var(--c-primary-rgb)/.14),transparent 60%),radial-gradient(900px 500px at -10% 110%,rgb(var(--c-secondary-rgb)/.14),transparent 60%),#0B1020;color:#E5E7EB}
+html.dark .card,html.dark .card-flat,html.dark .filter-box{background:var(--surface);border-color:var(--line);box-shadow:0 1px 0 rgb(255 255 255/.03) inset,0 10px 30px rgb(0 0 0/.25)}
+html.dark .glass{background:rgb(18 26 46/.82)}
+html.dark .muted,html.dark .hint{color:rgb(229 231 235/.62)}
+html.dark h1,html.dark h2,html.dark h3,html.dark b,html.dark strong{color:#F3F4F6}
+html.dark .label{color:rgb(229 231 235/.8)}
+html.dark .input,html.dark .select,html.dark .textarea{background:var(--surface-2);border-color:rgb(255 255 255/.14);color:#E5E7EB}
+html.dark .input::placeholder,html.dark .textarea::placeholder{color:rgb(229 231 235/.38)}
+html.dark .input:focus,html.dark .select:focus,html.dark .textarea:focus{border-color:var(--c-primary);box-shadow:0 0 0 4px rgb(var(--c-primary-rgb)/.2)}
+html.dark .btn-outline{background:transparent;color:#E5E7EB;border-color:rgb(255 255 255/.22)}html.dark .btn-outline:hover{background:rgb(255 255 255/.07);border-color:var(--c-primary);color:#fff}
+html.dark .btn-soft{background:rgb(var(--c-secondary-rgb)/.2);color:#d6ccff}html.dark .btn-soft:hover{background:rgb(var(--c-secondary-rgb)/.32)}
+html.dark .btn-danger{background:rgb(240 68 56/.1);color:#fda29b;border-color:rgb(240 68 56/.35)}html.dark .btn-danger:hover{background:rgb(240 68 56/.2)}
+html.dark .btn-white{background:#1b2540;color:#fff}
+html.dark .btn-ghost{color:#E5E7EB}html.dark .btn-ghost:hover{background:rgb(255 255 255/.07)}
+html.dark .chip{background:var(--surface-2);border-color:rgb(255 255 255/.14);color:#E5E7EB}html.dark .chip:hover{color:#fff;border-color:var(--c-primary)}html.dark .chip.active{background:var(--c-primary);color:#fff}
+html.dark .qty{background:var(--surface-2);border-color:rgb(255 255 255/.14)}html.dark .qty input{color:#fff}
+/* tables */
+html.dark .table-x th{background:#0F1730;color:rgb(229 231 235/.6);border-bottom-color:var(--line)}
+html.dark .table-x td{border-top-color:var(--line)}html.dark .table-x tbody tr:hover{background:rgb(255 255 255/.035)}
+html.dark .divide-y>:not([hidden])~:not([hidden]),html.dark .divide-black\/5>:not([hidden])~:not([hidden]){border-color:var(--line)}
+/* tailwind utilities used in admin views */
+html.dark .bg-white{background-color:var(--surface)!important}
+html.dark .bg-white\/90,html.dark .bg-white\/95{background-color:rgb(14 21 39/.88)!important}
+html.dark .bg-gray-50,html.dark .hover\:bg-gray-50:hover{background-color:rgb(255 255 255/.05)!important}
+html.dark .bg-gray-100,html.dark .hover\:bg-gray-100:hover{background-color:rgb(255 255 255/.08)!important}
+html.dark .bg-black\/5,html.dark .bg-black\/\[\.03\],html.dark .bg-black\/\[\.04\]{background-color:rgb(255 255 255/.06)!important}
+html.dark .border-black\/5,html.dark .border-black\/10,html.dark .border-b,html.dark .border-t{border-color:var(--line)}
+html.dark .text-gray-300{color:#9ca3af}html.dark .text-gray-600,html.dark .text-gray-700{color:#c8ccd4}html.dark .hover\:text-gray-900:hover{color:#fff}
+html.dark .text-ink,html.dark .text-ink\/80{color:#E5E7EB}
+html.dark .text-primary{color:#ff8a4c}
+html.dark .bg-primary\/10{background-color:rgb(var(--c-primary-rgb)/.2)!important}
+/* status badges & alerts → translucent so they read on dark */
+html.dark .bg-green-100,html.dark .bg-green-50{background-color:rgb(18 183 106/.16)!important}html.dark .text-green-700,html.dark .text-green-800{color:#6ce9a6!important}html.dark .border-green-200{border-color:rgb(18 183 106/.35)!important}
+html.dark .bg-red-100,html.dark .bg-red-50{background-color:rgb(240 68 56/.16)!important}html.dark .text-red-700,html.dark .text-red-800,html.dark .text-red-600{color:#fda29b!important}html.dark .border-red-200{border-color:rgb(240 68 56/.35)!important}
+html.dark .bg-amber-100,html.dark .bg-amber-50{background-color:rgb(247 144 9/.16)!important}html.dark .text-amber-800,html.dark .text-amber-600{color:#fec84b!important}html.dark .border-amber-300{border-color:rgb(247 144 9/.4)!important}
+html.dark .bg-blue-100,html.dark .bg-blue-50{background-color:rgb(46 144 250/.16)!important}html.dark .text-blue-700,html.dark .text-blue-800{color:#84caff!important}html.dark .border-blue-200{border-color:rgb(46 144 250/.35)!important}
+html.dark .bg-purple-100,html.dark .bg-indigo-100{background-color:rgb(158 119 237/.18)!important}html.dark .text-purple-700,html.dark .text-purple-800,html.dark .text-indigo-800{color:#d9c8ff!important}
+html.dark .bg-gray-900{background:#2a3350!important}
+/* sidebar + misc */
+html.dark #sidebar{background:#0E1527!important;border-color:var(--line)}
+html.dark .nav-link{color:#aeb6c6}html.dark .nav-link:hover{background:rgb(255 255 255/.06);color:#fff}
+html.dark .nav-link.on{background:rgb(var(--c-primary-rgb)/.2)!important;color:#ffb184!important}
+html.dark hr{border-color:var(--line)}
+html.dark code{background:rgb(255 255 255/.08)!important;color:#fcd9bd}
+html.dark .toast{background:#18213a;color:#fff;border-color:var(--line)}
+html.dark ::-webkit-scrollbar{width:10px;height:10px}html.dark ::-webkit-scrollbar-thumb{background:rgb(255 255 255/.16);border-radius:10px}html.dark ::-webkit-scrollbar-track{background:transparent}
+html.dark details>summary{color:#E5E7EB}
+html.dark .tint-primary{background:rgb(var(--c-primary-rgb)/.18)}html.dark .tint-secondary{background:rgb(var(--c-secondary-rgb)/.2)}html.dark .tint-accent{background:rgb(var(--c-accent-rgb)/.18)}
+html.dark select option{background:#121A2E;color:#E5E7EB}
+/* theme toggle icon swap */
+.theme-sun{display:none}html.dark .theme-sun{display:inline}html.dark .theme-moon{display:none}

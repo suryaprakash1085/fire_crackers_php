@@ -1,0 +1,1 @@
+<div class="card p-10 text-center"><h2 class="text-xl font-bold">Access denied</h2><p class="muted mt-2">Your role does not allow this section.</p><a class="btn btn-primary mt-4" href="<?= e(url('/admin')) ?>">Back to dashboard</a></div>

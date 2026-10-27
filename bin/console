@@ -1,0 +1,115 @@
+#!/usr/bin/env php
+<?php
+// Usage: php bin/console <command> [options]
+if (PHP_VERSION_ID < 80100) { fwrite(STDERR, "This project needs PHP 8.1 or newer (you have " . PHP_VERSION . ").\nIn XAMPP install a newer version (https://www.apachefriends.org) and run it with D:\\xampp\\php\\php.exe\n"); exit(1); }
+require __DIR__ . '/../app/bootstrap.php';
+use App\Core\{DB, Migrator, Seeder};
+
+if (PHP_SAPI !== 'cli') exit("CLI only\n");
+$args = array_slice($argv, 1); $cmd = $args[0] ?? 'help';
+$flags = array_values(array_filter($args, fn($a) => str_starts_with($a, '--'))); $pos = array_values(array_filter(array_slice($args, 1), fn($a) => !str_starts_with($a, '--')));
+$has = fn($f) => in_array($f, $flags, true);
+$opt = function (string $name) use ($flags) { foreach ($flags as $f) if (str_starts_with($f, "--$name=")) return substr($f, strlen($name) + 3); return null; };
+$say = fn($m) => print($m . PHP_EOL);
+$ask = function (string $q) { if (function_exists('readline')) return (string)readline($q); echo $q; return trim((string)fgets(STDIN)); };
+
+$envPath = ROOT . '/.env';
+$writeEnv = function (array $kv) use ($envPath) {
+    $txt = is_file($envPath) ? file_get_contents($envPath) : file_get_contents(ROOT . '/.env.example');
+    foreach ($kv as $k => $v) {
+        $line = $k . '=' . (preg_match('/[\s#"]/', (string)$v) ? '"' . $v . '"' : $v);
+        $txt = preg_match("/^$k=.*$/m", $txt) ? preg_replace("/^$k=.*$/m", str_replace(['\\', '$'], ['\\\\', '\\$'], $line), $txt) : rtrim($txt) . PHP_EOL . $line . PHP_EOL;
+    }
+    file_put_contents($envPath, $txt); App\Core\Env::load($envPath);
+};
+$envInit = function () use ($envPath, $writeEnv, $opt, $say) {
+    $new = !is_file($envPath);
+    $kv = [];
+    if ($new || str_contains((string)file_get_contents($envPath), 'change-me-to-a-long-random-string')) $kv['APP_KEY'] = bin2hex(random_bytes(32));
+    foreach (['db-host' => 'DB_HOST', 'db-port' => 'DB_PORT', 'db-name' => 'DB_NAME', 'db-user' => 'DB_USER', 'db-pass' => 'DB_PASS', 'url' => 'APP_URL', 'app-name' => 'APP_NAME'] as $o => $k) if (($v = $opt($o)) !== null) $kv[$k] = $v;
+    if ($new || $kv) { $writeEnv($kv); $say(($new ? '  created   .env' : '  updated   .env') . ($kv ? ' (' . implode(', ', array_keys($kv)) . ')' : '')); } else $say('  .env already exists — left unchanged');
+};
+$dbCreate = function () use ($say) {
+    $name = (string)env('DB_NAME', 'firecracker_shop');
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $name)) throw new RuntimeException('DB_NAME may only contain letters, numbers and underscore.');
+    $pdo = new PDO(sprintf('mysql:host=%s;port=%s;charset=utf8mb4', env('DB_HOST', '127.0.0.1'), env('DB_PORT', '3306')), (string)env('DB_USER', 'root'), (string)env('DB_PASS', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $pdo->exec("CREATE DATABASE IF NOT EXISTS `$name` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); $say("  database  `$name` ready");
+};
+
+try {
+    switch ($cmd) {
+        case 'env:init':
+            $envInit(); break;
+        case 'key:generate':
+            $writeEnv(['APP_KEY' => bin2hex(random_bytes(32))]); $say('New APP_KEY written. (Saved SMTP passwords encrypted with the old key must be re-entered.)'); break;
+        case 'db:create':
+            $dbCreate(); break;
+        case 'install':   // one command: .env + key + database + migrate + seed (+ optional admin)
+            $envInit(); $dbCreate(); Migrator::run($say); Seeder::run($has('--demo'), $say);
+            if (($em = $opt('admin-email')) && ($pw = $opt('admin-password'))) {
+                if (strlen($pw) < 10 || !filter_var($em, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Admin email invalid or password shorter than 10 characters.');
+                DB::exec('DELETE FROM admins WHERE email=?', [strtolower($em)]);
+                DB::insert('admins', ['name' => $opt('admin-name') ?? 'Owner', 'email' => strtolower($em), 'password_hash' => password_hash($pw, PASSWORD_DEFAULT), 'role' => 'superadmin', 'is_active' => 1]); $say("  admin     $em (superadmin)");
+            } else $say('Next: php bin/console admin:create');
+            $say('Install complete. Start the app: php bin/console serve'); break;
+        case 'serve':
+            $host = $opt('host') ?? '127.0.0.1'; $port = $opt('port') ?? '8000';
+            if (!preg_match('/^[0-9.a-zA-Z-]+$/', $host) || !ctype_digit($port)) throw new RuntimeException('Invalid --host/--port');
+            $say("Serving http://$host:$port  (admin: http://$host:$port/admin)  — Ctrl+C to stop");
+$p = proc_open([PHP_BINARY, '-S', "$host:$port", '-t', ROOT . '/public', ROOT . '/public/index.php'], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
+            if (!is_resource($p)) throw new RuntimeException('Could not start the PHP server.'); exit(proc_close($p)); break;
+        case 'doctor':
+            $okAll = true; $row = function (bool $ok, string $msg, string $fix = '') use ($say, &$okAll) { if (!$ok) $okAll = false; $say(($ok ? '  [ OK ] ' : '  [FAIL] ') . $msg . (!$ok && $fix ? "\n         → $fix" : '')); };
+            $row(PHP_VERSION_ID >= 80100, 'PHP ' . PHP_VERSION . ' (needs 8.1+)', 'Install a newer XAMPP');
+            $ini = php_ini_loaded_file() ?: '(none loaded)'; $say("  php.ini  : $ini");
+            foreach (['pdo_mysql' => 'extension=pdo_mysql', 'mbstring' => 'extension=mbstring', 'gd' => 'extension=gd', 'curl' => 'extension=curl', 'fileinfo' => 'extension=fileinfo', 'openssl' => 'extension=openssl'] as $ext => $line)
+                $row(extension_loaded($ext), "extension $ext", "Open $ini, remove the ';' before \"$line\", save, run again");
+            $row(is_file(ROOT . '/.env'), '.env file', 'php bin/console env:init   (or: install)');
+            $row(!in_array((string)env('APP_KEY', ''), ['', 'change-me-to-a-long-random-string'], true), 'APP_KEY is set', 'php bin/console key:generate');
+            try { DB::pdo(); $row(true, 'Database connection (' . env('DB_NAME') . ' @ ' . env('DB_HOST') . ')'); $pending = array_filter(Migrator::status(), fn($m) => !$m['applied']); $row(!$pending, 'Migrations up to date', 'php bin/console migrate'); $row((int)DB::val('SELECT COUNT(*) FROM admins') > 0, 'At least one admin exists', 'php bin/console admin:create'); }
+            catch (Throwable $e) { $row(false, 'Database connection: ' . $e->getMessage(), 'Start MySQL in the XAMPP Control Panel; check DB_HOST/DB_NAME/DB_USER/DB_PASS in .env; create the DB with: php bin/console db:create'); }
+            foreach (['public/uploads', 'storage'] as $d) { if (!is_dir(ROOT . "/$d")) @mkdir(ROOT . "/$d", 0775, true); $row(is_writable(ROOT . "/$d"), "$d is writable", 'Give your user write permission on this folder'); }
+            $say($okAll ? 'Everything looks good.' : 'Fix the [FAIL] items above, then run doctor again.'); exit($okAll ? 0 : 1);
+        case 'migrate':
+            $r = Migrator::run($say); $say($r ? count($r) . ' migration(s) applied.' : 'Nothing to migrate.'); break;
+        case 'migrate:status':
+            foreach (Migrator::status() as $s) $say(($s['applied'] ? '  [x] ' : '  [ ] ') . $s['file']); break;
+        case 'migrate:fresh':
+            if ((string)env('APP_ENV') === 'production' && !$has('--force')) { fwrite(STDERR, "Refusing to DROP ALL TABLES in production. Add --force if you really mean it.\n"); exit(1); }
+            $say('Dropped ' . Migrator::dropAll() . ' table(s).'); Migrator::run($say);
+            if ($has('--seed') || $has('--demo')) Seeder::run($has('--demo'), $say);
+            break;
+        case 'seed':
+            Seeder::run($has('--demo'), $say); break;
+        case 'db:setup':
+            Migrator::run($say); Seeder::run($has('--demo'), $say); $say('Database ready. Next: php bin/console admin:create'); break;
+        case 'admin:create':
+            $name = $pos[0] ?? trim($ask('Name: ')); $email = strtolower($pos[1] ?? trim($ask('Email: '))); $role = $pos[2] ?? 'superadmin';
+            $pw = $opt('password') ?? $ask('Password (min 10 chars): ');
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL) || !in_array($role, ['staff', 'admin', 'superadmin'], true) || $name === '') exit("Invalid name/email/role (role: staff|admin|superadmin)\n");
+            if (strlen($pw) < 10) exit("Password must be at least 10 characters\n");
+            if (DB::val('SELECT 1 FROM admins WHERE email=?', [$email])) { DB::update('admins', ['password_hash' => password_hash($pw, PASSWORD_DEFAULT), 'name' => $name, 'role' => $role, 'is_active' => 1], 'email=?', [$email]); $say("Admin updated: $email ($role)"); }
+            else { DB::insert('admins', ['name' => $name, 'email' => $email, 'password_hash' => password_hash($pw, PASSWORD_DEFAULT), 'role' => $role, 'is_active' => 1]); $say("Admin created: $email ($role)"); }
+            break;
+        default:
+            $say(<<<TXT
+Commands:
+  doctor                  Check PHP version/extensions, .env, database connection, migrations
+  install [--demo] [--db-host= --db-port= --db-name= --db-user= --db-pass= --url=] [--admin-email= --admin-password= --admin-name=]
+                          ONE-STEP SETUP: creates .env (random APP_KEY), the database, runs migrations + seeders
+  serve [--host=127.0.0.1] [--port=8000]
+                          Start the built-in dev server
+  env:init [--db-*=...]   Create/update .env from .env.example (generates APP_KEY)
+  key:generate            Generate a new APP_KEY
+  db:create               CREATE DATABASE IF NOT EXISTS (uses DB_* from .env)
+  migrate                 Apply pending migrations (database/migrations/*.sql)
+  migrate:status          Show applied / pending migrations
+  migrate:fresh [--seed] [--demo] [--force]
+                          DROP all tables, re-migrate, optionally seed
+  seed [--demo]           Insert default settings/pages/services/banners (idempotent); --demo adds sample categories & products
+  db:setup [--demo]       migrate + seed (first-time setup)
+  admin:create [name] [email] [role] [--password=...]
+                          Create (or reset) an admin. Roles: staff | admin | superadmin
+TXT);
+    }
+} catch (Throwable $e) { fwrite(STDERR, 'ERROR: ' . $e->getMessage() . PHP_EOL); exit(1); }

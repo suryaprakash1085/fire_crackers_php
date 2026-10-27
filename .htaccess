@@ -1,0 +1,4 @@
+# If your host cannot point the document root at /public, this forwards everything there.
+RewriteEngine On
+RewriteRule ^$ public/ [L]
+RewriteRule (.*) public/$1 [L]
