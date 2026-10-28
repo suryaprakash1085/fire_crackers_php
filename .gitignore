@@ -1,5 +1,6 @@
 .env
 storage/logs/*
 !storage/logs/.gitkeep
+storage/product-form-uploads/
 public/uploads/*
 !public/uploads/.htaccess

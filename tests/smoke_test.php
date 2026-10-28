@@ -16,6 +16,7 @@ $baseOpt = null; foreach ($argv as $a) if (str_starts_with($a, '--base=')) $base
 
 /* ---------- fresh database ---------- */
 Migrator::dropAll(); Migrator::run(); Seeder::run(true, fn($m) => null);
+\App\Models\Setting::set('min_order_amount', '0');
 DB::insert('admins', ['name' => 'Owner', 'email' => 'owner@example.com', 'password_hash' => password_hash('SuperSecret123', PASSWORD_DEFAULT), 'role' => 'superadmin']);
 DB::insert('admins', ['name' => 'Helper', 'email' => 'staff@example.com', 'password_hash' => password_hash('StaffSecret123', PASSWORD_DEFAULT), 'role' => 'staff']);
 
@@ -118,6 +119,9 @@ foreach ([
     $pr = \App\Services\VoiceParser::parse($utt); $got = []; foreach ($pr['matches'] as $m0) $got[$ids[$m0['product_id']]] = $m0['qty']; ksort($got); ksort($exp);
     check('parser: ' . mb_substr($utt, 0, 40), $got === $exp, $got);
 }
+$twentyFive = \App\Services\VoiceParser::parse('add twenty five rockets'); $gotTwentyFive = [];
+foreach ($twentyFive['matches'] as $match) $gotTwentyFive[$ids[$match['product_id']]] = $match['qty'];
+check('voice compound number words are quantity only', $gotTwentyFive === ['RK401' => 25] && $twentyFive['unmatched'] === [], $twentyFive);
 check('polite words are not reported as "not found"', \App\Services\VoiceParser::parse('okay thank you hello')['unmatched'] === []);
 
 /* ---------- checkout (as a VOICE order) ---------- */
@@ -162,6 +166,15 @@ foreach ([['/admin', 'Recent orders'], ['/admin/orders', 'Voice Order'], ['/admi
     $r = $a->get($p); check("admin GET $p", $r['s'] === 200 && stripos($r['b'], $n) !== false, $r['s']);
 }
 $AT = csrf($a->get('/admin')['b']);
+/* minimum-order rule */
+[$cvMin, $HvMin] = fresh(); $cvMin->json('POST', '/api/cart/add', ['product_id' => $SP, 'qty' => 1], $HvMin);
+$checkoutMin = $cvMin->get('/checkout'); preg_match('/name="checkout_token" value="([^"]+)"/', $checkoutMin['b'], $minTokenMatch);
+$formMin = array_replace($form, ['_csrf' => formCsrf($checkoutMin['b']), 'checkout_token' => $minTokenMatch[1] ?? '']);
+$a->post('/admin/company', ['_csrf' => $AT, 'min_order_amount' => '999999']);
+$ordersBeforeMinimum = (int)DB::val('SELECT COUNT(*) FROM orders'); $stockBeforeMinimum = stock('SP201');
+$r = $cvMin->post('/checkout', $formMin);
+check('minimum order amount blocks below-minimum checkout', str_contains($r['b'], 'Minimum order amount is') && (int)DB::val('SELECT COUNT(*) FROM orders') === $ordersBeforeMinimum && stock('SP201') === $stockBeforeMinimum, $r['b']);
+$a->post('/admin/company', ['_csrf' => $AT, 'min_order_amount' => '0']);
 /* role-based access: staff cannot open product/settings pages */
 $s = new Http($BASE, false); $lt2 = formCsrf($s->get('/admin/login')['b']); $s->post('/admin/login', ['_csrf' => $lt2, 'email' => 'staff@example.com', 'password' => 'StaffSecret123']);
 check('staff can open orders', $s->get('/admin/orders')['s'] === 200);
@@ -183,12 +196,36 @@ $a->post("/admin/orders/$oid/status", ['_csrf' => $AT, 'status' => 'cancelled', 
 check('cancelled order cannot be reopened', str_contains($a->post("/admin/orders/$oid/status", ['_csrf' => $AT, 'status' => 'packed'])['b'], 'cannot be reopened'));
 /* products */
 $pf = ['_csrf' => $AT, 'sku' => 'tst901', 'name' => 'Test <b>Rocket</b>', 'name_ta' => 'சோதனை', 'category_id' => '1', 'original_price' => '100', 'selling_price' => '80', 'stock' => '5', 'low_stock_threshold' => '10', 'status' => 'active', 'description' => 'd', 'aliases' => 'test rocket'];
-$r = $a->post('/admin/products/save', $pf); check('product create (discount computed)', str_contains($r['b'], 'Product saved') && (float)DB::val("SELECT discount_percent FROM products WHERE sku='TST901'") === 20.0);
+$imgPath = sys_get_temp_dir() . '/fc-pending-' . getmypid() . '.png';
+file_put_contents($imgPath, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='));
+$videoPath = sys_get_temp_dir() . '/fc-pending-' . getmypid() . '.mp4';
+file_put_contents($videoPath, "\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom");
+$invalidWithImage = ['selling_price' => '500'] + $pf + [
+    'images[0]' => new CURLFile($imgPath, 'image/png', 'pending-product.png'),
+    'video' => new CURLFile($videoPath, 'video/mp4', 'pending-product.mp4'),
+];
+$r = $a->post('/admin/products/save', $invalidWithImage);
+preg_match('/name="pending_upload_token" value="([a-f0-9]{32})"/', $r['b'], $pendingMatch); $pendingToken = $pendingMatch[1] ?? '';
+check('product form keeps image and video after validation error', $pendingToken !== '' && str_contains($r['b'], 'pending-product.png') && str_contains($r['b'], 'pending-product.mp4') && str_contains($r['b'], 'not more than the original'));
+$r = $a->post('/admin/products/save', $pf + ['pending_upload_token' => $pendingToken]);
+check('product create (discount computed)', str_contains($r['b'], 'Product saved') && (float)DB::val("SELECT discount_percent FROM products WHERE sku='TST901'") === 20.0);
+check('kept image saved after corrected product submit', (int)DB::val("SELECT COUNT(*) FROM product_images i JOIN products p ON p.id=i.product_id WHERE p.sku='TST901'") === 1);
+$savedVideo = (string)DB::val("SELECT video_path FROM products WHERE sku='TST901'");
+check('kept video saved after corrected product submit', $savedVideo !== '' && is_file(PUBLIC_PATH . '/' . $savedVideo));
+@unlink($imgPath); @unlink($videoPath);
 $b = (new Http($BASE))->get('/products')['b']; check('XSS escaped in product name', str_contains($b, '&lt;b&gt;Rocket') && !str_contains($b, '<b>Rocket'));
 check('selling > original rejected', str_contains($a->post('/admin/products/save', ['selling_price' => '500'] + $pf)['b'], 'not more than the original'));
 check('duplicate SKU rejected', str_contains($a->post('/admin/products/save', ['sku' => 'FP101'] + $pf)['b'], 'already exists'));
 check('category with products cannot be deleted', str_contains($a->post('/admin/categories/1/delete', ['_csrf' => $AT])['b'], 'has products'));
 $a->post('/admin/products/' . sid('TST901') . '/archive', ['_csrf' => $AT]); check('archived product hidden from customers', (new Http($BASE))->get('/product-details.php?id=' . sid('TST901'))['s'] === 404);
+$exportFile = tempnam(sys_get_temp_dir(), 'fc_export_');
+$defaultExport = $a->get('/admin/products/template'); file_put_contents($exportFile, $defaultExport['b']);
+$defaultRows = \App\Services\Xlsx::read($exportFile, 'Products');
+$allExport = $a->get('/admin/products/template?include_archived=1'); file_put_contents($exportFile, $allExport['b']);
+$allRows = \App\Services\Xlsx::read($exportFile, 'Products');
+check('Excel export omits archived products by default', !in_array((string)sid('TST901'), array_column($defaultRows, 0), true));
+check('Excel export option includes archived products', in_array((string)sid('TST901'), array_column($allRows, 0), true));
+@unlink($exportFile);
 /* customization */
 $cz = ['_csrf' => $AT, 'brand_name' => 'Test Brand', 'color_primary' => '#112233', 'color_secondary' => '#445566', 'color_accent' => '#778899', 'color_bg' => '#FFFFFF', 'color_text' => '#111111', 'color_button' => '#0A0B0C', 'color_button_text' => '#FFFFFF', 'header_style' => 'white', 'footer_style' => 'white', 'delivery_charge' => '80', 'free_delivery_above' => '2000', 'min_order_amount' => '0', 'bulk_discount_min' => '0', 'bulk_discount_percent' => '0', 'max_qty_per_item' => '500', 'restricted_states' => '', 'payment_cod_enabled' => '1', 'payment_cod_label' => 'COD', 'show_offers' => '1'];
 $a->post('/admin/customize', $cz); $b = (new Http($BASE))->get('/')['b']; check('customization propagates (colours + brand)', str_contains($b, '--c-primary:#112233') && str_contains($b, 'Test Brand') && str_contains($b, '--c-button:#0A0B0C'));
@@ -201,7 +238,22 @@ $x = $a->get('/admin/products/template?blank=1'); check('blank Excel template do
 $tmp = sys_get_temp_dir() . '/fc_imp_' . getmypid() . '.csv'; file_put_contents($tmp, "SKU,Product Name,Category,Original Price,Selling Price,Stock\nXLS-1,Excel Item,Flower Pots,100,80,7\n");
 $r = $a->post('/admin/products/import', ['_csrf' => $AT, 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]); check('Excel/CSV import adds product', str_contains($r['b'], 'New products added') && (int)DB::val("SELECT stock FROM products WHERE sku='XLS-1'") === 7);
 file_put_contents($tmp, "SKU,Stock\nXLS-1,12\n"); $a->post('/admin/products/import', ['_csrf' => $AT, 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]); check('Excel/CSV import updates stock only', (int)DB::val("SELECT stock FROM products WHERE sku='XLS-1'") === 12 && (float)DB::val("SELECT selling_price FROM products WHERE sku='XLS-1'") == 80.0);
+$xlsId = (int)DB::val("SELECT id FROM products WHERE sku='XLS-1'");
+$xlsxTmp = sys_get_temp_dir() . '/fc_imp_' . getmypid() . '.xlsx';
+$xlsx = \App\Services\Xlsx::build([['name' => 'Products', 'rows' => [
+    ['ID', 'SKU', 'Stock', 'Stock at export'], [$xlsId, 'XLS-1', 21, 12], [$xlsId, 'XLS-1', 22, 12],
+]]]);
+file_put_contents($xlsxTmp, $xlsx);
+$r = $a->post('/admin/products/import', ['_csrf' => $AT, 'sheet' => new CURLFile($xlsxTmp, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'products.xlsx')]);
+check('real XLSX import reports repeated product IDs', str_contains($r['b'], 'appears more than once in the file') && (int)DB::val("SELECT stock FROM products WHERE sku='XLS-1'") === 21);
+file_put_contents($tmp, "ID,SKU,Stock,Stock at export\n$xlsId,XLS-1,3,12\n");
+$r = $a->post('/admin/products/import', ['_csrf' => $AT, 'stock_mode' => 'add', 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]);
+check('stock Add mode applies signed delta and warns on changed snapshot', (int)DB::val("SELECT stock FROM products WHERE sku='XLS-1'") === 24 && str_contains($r['b'], 'Stock changed by orders after this file was downloaded'));
+file_put_contents($tmp, "ID,SKU,Stock\n$xlsId,XLS-1,-2\n");
+$a->post('/admin/products/import', ['_csrf' => $AT, 'stock_mode' => 'add', 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]);
+check('stock Add mode applies negative adjustment', (int)DB::val("SELECT stock FROM products WHERE sku='XLS-1'") === 22);
 @unlink($tmp);
+@unlink($xlsxTmp);
 /* ---------- FULL VOICE JOURNEY: ONE sentence -> checkout -> tracking -> admin -> cancel ---------- */
 [$jv, $Hj] = fresh(); $want = ['FP101' => 5, 'SP201' => 2, 'GC301' => 3, 'GB801' => 1, 'SC501' => 4]; $sb = []; foreach ($want as $k0 => $_) $sb[$k0] = stock($k0);
 $j = $jv->json('POST', '/api/voice/parse', ['text' => 'add five flower pots, two sparklers, three ground chakras, one family gift box and four lakshmi crackers', 'lang' => 'en'], $Hj);

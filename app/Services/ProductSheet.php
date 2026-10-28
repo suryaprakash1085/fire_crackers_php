@@ -16,6 +16,7 @@ final class ProductSheet {
         'Original Price'  => ['original_price', 14],
         'Selling Price'   => ['selling_price', 14],
         'Stock'           => ['stock', 10],
+        'Stock at export' => ['stock_baseline', 16],
         'Low Stock Alert' => ['low_stock_threshold', 14],
         'Status'          => ['status', 12],
         'Featured'        => ['is_featured', 11],
@@ -28,25 +29,26 @@ final class ProductSheet {
         'id' => 'id', 'productid' => 'id', 'sku' => 'sku', 'code' => 'sku', 'productcode' => 'sku', 'name' => 'name', 'product' => 'name', 'productname' => 'name',
         'tamilname' => 'name_ta', 'nameta' => 'name_ta', 'nametamil' => 'name_ta', 'category' => 'category', 'categoryname' => 'category',
         'originalprice' => 'original_price', 'mrp' => 'original_price', 'price' => 'original_price', 'sellingprice' => 'selling_price', 'saleprice' => 'selling_price', 'offerprice' => 'selling_price',
-        'stock' => 'stock', 'qty' => 'stock', 'quantity' => 'stock', 'lowstockalert' => 'low_stock_threshold', 'lowstock' => 'low_stock_threshold', 'lowstockthreshold' => 'low_stock_threshold',
+        'stock' => 'stock', 'qty' => 'stock', 'quantity' => 'stock', 'stockatexport' => 'stock_baseline', 'lowstockalert' => 'low_stock_threshold', 'lowstock' => 'low_stock_threshold', 'lowstockthreshold' => 'low_stock_threshold',
         'status' => 'status', 'featured' => 'is_featured', 'popular' => 'is_popular', 'description' => 'description', 'safetynotes' => 'safety_notes', 'safety' => 'safety_notes',
         'voicealiases' => 'aliases', 'aliases' => 'aliases',
     ];
     private static function norm(string $h): string { return preg_replace('/[^a-z0-9]/', '', mb_strtolower(trim($h))); }
 
     /** Builds the workbook. $withProducts=false gives an empty template with one example row. */
-    public static function export(bool $withProducts): string {
+    public static function export(bool $withProducts, bool $includeArchived = false): string {
         $head = array_keys(self::COLS);
         $rows = [$head];
         if ($withProducts) {
-            foreach (DB::all("SELECT p.*, c.name category_name FROM products p JOIN categories c ON c.id=p.category_id WHERE p.status<>'archived' ORDER BY c.name, p.name") as $p) {
-                $rows[] = [(int)$p['id'], $p['sku'], $p['name'], $p['name_ta'], $p['category_name'], (float)$p['original_price'], (float)$p['selling_price'], (int)$p['stock'], (int)$p['low_stock_threshold'],
+            $where = $includeArchived ? '' : "WHERE p.status<>'archived'";
+            foreach (DB::all("SELECT p.*, c.name category_name FROM products p JOIN categories c ON c.id=p.category_id $where ORDER BY c.name, p.name") as $p) {
+                $rows[] = [(int)$p['id'], $p['sku'], $p['name'], $p['name_ta'], $p['category_name'], (float)$p['original_price'], (float)$p['selling_price'], (int)$p['stock'], (int)$p['stock'], (int)$p['low_stock_threshold'],
                     $p['status'], $p['is_featured'] ? 'Yes' : 'No', $p['is_popular'] ? 'Yes' : 'No', $p['description'], $p['safety_notes'], $p['aliases']];
             }
         }
         if (count($rows) === 1) { // example row (ID blank = new product)
             $cat = (string)DB::val('SELECT name FROM categories ORDER BY id LIMIT 1');
-            $rows[] = ['', 'SAMPLE-001', 'Sample Flower Pot (delete this row)', 'பூந்தொட்டி', $cat ?: 'Flower Pots', 250, 175, 100, 10, 'active', 'No', 'No', 'Short description', 'Light from a distance', 'flower pot, flowerpot'];
+            $rows[] = ['', 'SAMPLE-001', 'Sample Flower Pot (delete this row)', 'பூந்தொட்டி', $cat ?: 'Flower Pots', 250, 175, 100, 100, 10, 'active', 'No', 'No', 'Short description', 'Light from a distance', 'flower pot, flowerpot'];
         }
         $cats = DB::all('SELECT name FROM categories ORDER BY name');
         $lists = [['Categories', 'Status', 'Yes / No']];
@@ -59,9 +61,10 @@ final class ProductSheet {
             ['3. To ADD new products: add a row at the bottom, leave ID empty, fill SKU, Product Name, Category, Original Price and Selling Price.'],
             ['4. On existing products, an EMPTY cell means "keep the current value". To clear a text field, type a single dash  -'],
             ['5. Category must match an existing category name (pick from the dropdown). Status: active / inactive / archived. Featured / Popular: Yes or No.'],
-            ['6. Selling Price cannot be more than Original Price. Stock is the new total quantity (not an addition).'],
-            ['7. Images and videos are not part of this sheet – add them from the product page. New products from this sheet are created without images.'],
-            ['8. Up to ' . self::MAX_ROWS . ' rows per upload. Rows with errors are skipped and listed after the upload; the good rows are saved.']];
+            ['6. Selling Price cannot be more than Original Price. Stock at export is a read-only snapshot used to detect changes since download.'],
+            ['7. Replace mode: Stock is the new total. Add mode: replace the exported total with a signed adjustment (+/-) applied to current stock.'],
+            ['8. Images and videos are not part of this sheet – add them from the product page. New products from this sheet are created without images.'],
+            ['9. Up to ' . self::MAX_ROWS . ' rows per upload. Rows with errors are skipped and listed after the upload; the good rows are saved.']];
         return Xlsx::build([
             ['name' => 'Products', 'rows' => $rows, 'widths' => array_column(self::COLS, 1), 'validations' => [
                 ['col' => $col('category'), 'list' => 'Lists!$A$2:$A$' . max(2, count($cats) + 1), 'rows' => $n, 'error' => 'Choose an existing category.'],
@@ -113,18 +116,23 @@ final class ProductSheet {
     private static function yn(string $v): ?int { $v = mb_strtolower($v); if (in_array($v, ['yes', 'y', '1', 'true', 'x', 'ok'], true)) return 1; if (in_array($v, ['no', 'n', '0', 'false'], true)) return 0; return null; }
 
     /**
-     * @return array{added:int,updated:int,unchanged:int,errors:array<array{line:int,sku:string,msg:string}>,newCats:int}
+     * @return array{added:int,updated:int,unchanged:int,errors:array<array{line:int,sku:string,msg:string}>,warnings:array<array{line:int,sku:string,msg:string}>,newCats:int}
      */
-    public static function import(string $tmp, string $origName, bool $createCategories): array {
+    public static function import(string $tmp, string $origName, bool $createCategories, string $stockMode = 'replace'): array {
+        if (!in_array($stockMode, ['replace', 'add'], true)) throw new \RuntimeException('Choose Replace or Add (+/-) for stock mode.');
         [$rows, $cols] = self::load($tmp, $origName);
         if (!$rows) throw new \RuntimeException('No product rows found in the file.');
         $cats = []; foreach (DB::all('SELECT id,name FROM categories') as $c) $cats[mb_strtolower(trim($c['name']))] = (int)$c['id'];
-        $res = ['added' => 0, 'updated' => 0, 'unchanged' => 0, 'errors' => [], 'newCats' => 0];
-        $pdo = DB::pdo(); $seenSku = []; $plan = [];
+        $res = ['added' => 0, 'updated' => 0, 'unchanged' => 0, 'errors' => [], 'warnings' => [], 'newCats' => 0];
+        $pdo = DB::pdo(); $seenSku = []; $seenId = []; $plan = [];
 
         foreach ($rows as ['line' => $line, 'd' => $d]) {
             $err = function (string $m) use (&$res, $line, $d) { $res['errors'][] = ['line' => $line, 'sku' => ($d['sku'] ?? '') !== '' ? $d['sku'] : ($d['name'] ?? ''), 'msg' => $m]; };
             $sku = strtoupper(trim($d['sku'] ?? '')); $id = (int)preg_replace('/\D/', '', $d['id'] ?? '');
+            if ($id) {
+                if (isset($seenId[$id])) { $err("ID $id appears more than once in the file (first on row {$seenId[$id]})."); continue; }
+                $seenId[$id] = $line;
+            }
             $cur = null;
             if ($id) { $cur = DB::one('SELECT * FROM products WHERE id=?', [$id]); if (!$cur) { $err("ID $id does not exist. Clear the ID to add it as a new product."); continue; } }
             elseif ($sku !== '') $cur = DB::one('SELECT * FROM products WHERE sku=?', [$sku]);
@@ -168,13 +176,31 @@ final class ProductSheet {
                     else { $new['original_price'] = round($o, 2); $new['selling_price'] = round($s, 2); $new['discount_percent'] = round(($o - $s) / $o * 100, 2); }
                 }
             }
-            // stock & threshold
-            foreach (['stock' => [0, 10000000, 'Stock'], 'low_stock_threshold' => [0, 10000000, 'Low Stock Alert']] as $k => [$lo, $hi, $lab]) {
-                if ($bad) break;
-                if (($d[$k] ?? '') === '') { if (!$cur) $new[$k] = $k === 'stock' ? 0 : 10; continue; }
-                $n = self::num($d[$k]);
-                if ($n === null || $n < $lo || $n > $hi || floor($n) != $n) $bad = "$lab must be a whole number (0 or more).";
-                else $new[$k] = (int)$n;
+            // Warn when the stock snapshot from export no longer matches current stock.
+            if ($cur && ($d['stock_baseline'] ?? '') !== '') {
+                $baseline = self::num($d['stock_baseline']);
+                if ($baseline !== null && floor($baseline) == $baseline && (int)$baseline !== (int)$cur['stock']) {
+                    $res['warnings'][] = ['line' => $line, 'sku' => $sku, 'msg' => 'Stock changed by orders after this file was downloaded. Exported stock was ' . (int)$baseline . '; current stock is ' . (int)$cur['stock'] . '.'];
+                }
+            }
+            // Stock can be replaced by an absolute total or adjusted by a signed delta.
+            if (!$bad) {
+                if (($d['stock'] ?? '') !== '') {
+                    $stockValue = self::num($d['stock']);
+                    if ($stockValue === null || floor($stockValue) != $stockValue) $bad = 'Stock must be a whole number.';
+                    elseif ($stockMode === 'add' && abs($stockValue) > 10000000) $bad = 'Stock adjustment must be between -10,000,000 and 10,000,000.';
+                    elseif ($stockMode === 'replace' && ($stockValue < 0 || $stockValue > 10000000)) $bad = 'Stock must be a whole number (0 or more).';
+                    else {
+                        $nextStock = $stockMode === 'add' ? (int)($cur['stock'] ?? 0) + (int)$stockValue : (int)$stockValue;
+                        if ($nextStock < 0 || $nextStock > 10000000) $bad = 'The stock change would result in a value outside 0 to 10,000,000.';
+                        else $new['stock'] = $nextStock;
+                    }
+                } elseif (!$cur) $new['stock'] = 0;
+                if (!$bad && ($d['low_stock_threshold'] ?? '') !== '') {
+                    $n = self::num($d['low_stock_threshold']);
+                    if ($n === null || $n < 0 || $n > 10000000 || floor($n) != $n) $bad = 'Low Stock Alert must be a whole number (0 or more).';
+                    else $new['low_stock_threshold'] = (int)$n;
+                } elseif (!$cur) $new['low_stock_threshold'] = 10;
             }
             // status / flags
             if (!$bad) {

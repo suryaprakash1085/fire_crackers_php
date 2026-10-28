@@ -49,6 +49,7 @@ final class VoiceParser {
                     $sub = array_slice($tt, $o, $L);
                     if ($L === 1 && (mb_strlen($sub[0]) < 4 || in_array($sub[0], self::GENERIC, true) || self::number($sub[0]) !== null)) continue;
                     if ($L > 1 && !array_diff($sub, self::GENERIC)) continue;
+                    if ($L > 1 && count(array_filter($sub, fn($word) => self::number($word) !== null)) === $L) continue;
                     for ($i = 0; $i + $L <= $n; $i++) if (self::seqMatch($tokens, $i, $sub)) $cands[] = ['s' => $i, 'l' => $L, 'id' => (int)$p['id'], 'score' => $L * 40 + mb_strlen(implode('', $sub)), 'g' => true, 'nl' => $nl, 'ph' => implode(' ', array_slice($tokens, $i, $L))];
                 }
             }

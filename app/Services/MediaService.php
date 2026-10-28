@@ -56,13 +56,17 @@ final class MediaService {
             return ['ok' => false, 'message' => $m];
         }
         if (!is_uploaded_file($f['tmp_name'])) return ['ok' => false, 'message' => 'Invalid upload.'];
-        if (filesize($f['tmp_name']) > self::VIDEO_MAX) return ['ok' => false, 'message' => 'Video must be under 50 MB.'];
-        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($f['tmp_name']);
+        return self::fromVideoBytes((string)file_get_contents($f['tmp_name']), (string)$f['name']);
+    }
+    /** Stores a previously staged product video after validating its content. */
+    public static function fromVideoBytes(string $bytes, string $origName): array {
+        if ($bytes === '' || strlen($bytes) > self::VIDEO_MAX) return ['ok' => false, 'message' => 'Video must be under 50 MB.'];
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
         if (!isset(self::VIDEO_MIME[$mime])) return ['ok' => false, 'message' => 'Only MP4 or WebM videos are allowed.'];
         $dir = 'uploads/videos/' . date('Y/m');
         if (!is_dir(PUBLIC_PATH . '/' . $dir) && !@mkdir(PUBLIC_PATH . '/' . $dir, 0775, true)) return ['ok' => false, 'message' => 'Upload folder is not writable.'];
         $path = $dir . '/' . bin2hex(random_bytes(12)) . '.' . self::VIDEO_MIME[$mime];
-        if (!move_uploaded_file($f['tmp_name'], PUBLIC_PATH . '/' . $path)) return ['ok' => false, 'message' => 'Could not save the video.'];
+        if (file_put_contents(PUBLIC_PATH . '/' . $path, $bytes, LOCK_EX) === false) return ['ok' => false, 'message' => 'Could not save the video.'];
         return ['ok' => true, 'message' => 'Uploaded.', 'path' => $path];
     }
     public static function deleteVideo(?string $path): void {
