@@ -2,7 +2,7 @@
 namespace App\Controllers\Admin;
 
 use App\Core\DB;
-use App\Services\MediaService;
+use App\Services\{MediaService, ProductSheet, Xlsx};
 
 final class ProductsController extends AdminController {
     protected string $minRole = 'admin';
@@ -18,6 +18,29 @@ final class ProductsController extends AdminController {
         $total = (int)DB::val("SELECT COUNT(*) FROM products p WHERE $where", $p);
         $rows = DB::all("SELECT p.*, c.name category_name, (SELECT path FROM product_images i WHERE i.product_id=p.id ORDER BY i.is_primary DESC,i.sort_order,i.id LIMIT 1) image FROM products p JOIN categories c ON c.id=p.category_id WHERE $where ORDER BY p.id DESC LIMIT $per OFFSET " . (($page - 1) * $per), $p);
         $this->render('admin/products/index', ['title' => 'Products', 'rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => max(1, (int)ceil($total / $per)), 'categories' => DB::all('SELECT id,name FROM categories ORDER BY name'), 'f' => compact('q', 'cat', 'st', 'stock')]);
+    }
+    /** Excel download: ?blank=1 gives an empty template, otherwise every current product (edit & re-upload). */
+    public function template(): void {
+        if (!Xlsx::available()) { flash('error', 'The PHP "zip" extension is off, so Excel files cannot be created. Enable extension=zip in php.ini.'); redirect('/admin/products/import'); }
+        $bin = ProductSheet::export(empty($_GET['blank']));
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="products-' . (empty($_GET['blank']) ? 'edit-' . date('Ymd-His') : 'new-template') . '.xlsx"');
+        header('Content-Length: ' . strlen($bin)); header('Cache-Control: no-store');
+        echo $bin; exit;
+    }
+    public function importForm(): void { $this->render('admin/products/import', ['title' => 'Excel import / export', 'result' => null, 'error' => null, 'zip' => Xlsx::available()]); }
+    public function importSubmit(): void {
+        $this->post();
+        $f = $_FILES['sheet'] ?? null; $result = null; $error = null;
+        if (!$f || ($f['error'] ?? 4) !== UPLOAD_ERR_OK) $error = ($f['error'] ?? 4) === UPLOAD_ERR_NO_FILE || !$f ? 'Choose the Excel file first.' : 'Upload failed (file too large for the server?).';
+        elseif ($f['size'] > 8 * 1024 * 1024) $error = 'File is too large (max 8 MB).';
+        elseif (!is_uploaded_file($f['tmp_name'])) $error = 'Invalid upload.';
+        else {
+            try { @set_time_limit(120); $result = ProductSheet::import($f['tmp_name'], (string)$f['name'], !empty($_POST['create_categories'])); }
+            catch (\RuntimeException $e) { $error = $e->getMessage(); }
+            if ($result) log_error(sprintf('product import by %s: +%d ~%d =%d !%d', $this->admin['email'] ?? '?', $result['added'], $result['updated'], $result['unchanged'], count($result['errors'])));
+        }
+        $this->render('admin/products/import', ['title' => 'Excel import / export', 'result' => $result, 'error' => $error, 'zip' => Xlsx::available()]);
     }
     public function show(string $id): void {
         $p = DB::one('SELECT p.*, c.name category_name FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=?', [(int)$id]);

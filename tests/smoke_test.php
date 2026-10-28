@@ -152,20 +152,20 @@ check('track: correct shows order', str_contains(($b = $ct->post('/track', ['_cs
 check('track: guessing order id impossible', str_contains($ct->post('/track', ['_csrf' => $tt, 'reference' => '1', 'mobile' => '9876543210'])['b'], 'No order found'));
 
 /* ---------- admin: access control ---------- */
-foreach (['/admin', '/admin/orders', '/admin/products', '/admin/customize', '/admin/ai-image', '/admin/smtp', '/admin/media/json', '/admin/users', '/admin/banners'] as $p) { $r = (new Http($BASE, false))->get($p); check("anon blocked $p", $r['s'] === 302 && str_contains((string)$r['loc'], 'login'), $r['s']); }
-foreach (['/admin/orders/1/status', '/admin/products/save', '/admin/media/upload'] as $p) check("anon POST blocked $p", (new Http($BASE, false))->post($p, [])['s'] === 302);
+foreach (['/admin', '/admin/orders', '/admin/products', '/admin/customize', '/admin/smtp', '/admin/products/template', '/admin/products/import', '/admin/users', '/admin/banners'] as $p) { $r = (new Http($BASE, false))->get($p); check("anon blocked $p", $r['s'] === 302 && str_contains((string)$r['loc'], 'login'), $r['s']); }
+foreach (['/admin/orders/1/status', '/admin/products/save', '/admin/products/import'] as $p) check("anon POST blocked $p", (new Http($BASE, false))->post($p, [])['s'] === 302);
 $a = new Http($BASE); $lt = formCsrf($a->get('/admin/login')['b']);
 check('bad login rejected', str_contains($a->post('/admin/login', ['_csrf' => $lt, 'email' => 'owner@example.com', 'password' => 'wrong'])['b'], 'Invalid email or password'));
 $r = $a->post('/admin/login', ['_csrf' => $lt, 'email' => 'owner@example.com', 'password' => 'SuperSecret123']); check('admin login ok', str_contains($r['b'], 'Dashboard'));
 foreach ([['/admin', 'Recent orders'], ['/admin/orders', 'Voice Order'], ['/admin/products', 'Flower Pot'], ['/admin/products/create', 'Tamil name'], ['/admin/products/' . $FP, 'Units sold'], ['/admin/products/' . $FP . '/edit', 'Voice Order aliases'], ['/admin/categories', 'Flower Pots'], ['/admin/categories/create', 'Category image'],
-          ['/admin/banners', 'Light Up'], ['/admin/banners/1/edit', 'Banner image'], ['/admin/services', 'Home Delivery'], ['/admin/enquiries', 'Enquiries'], ['/admin/content', 'Privacy'], ['/admin/media', 'Upload'], ['/admin/ai-image', 'not configured'], ['/admin/customize', 'Primary colour'], ['/admin/smtp', 'SMTP'], ['/admin/users', 'Admin users'], ['/admin/account', 'Change password']] as [$p, $n]) {
+          ['/admin/banners', 'Light Up'], ['/admin/banners/1/edit', 'Banner image'], ['/admin/services', 'Home Delivery'], ['/admin/enquiries', 'Enquiries'], ['/admin/content', 'Privacy'], ['/admin/products/import', 'Download Excel'], ['/admin/customize', 'Primary colour'], ['/admin/smtp', 'SMTP'], ['/admin/users', 'Admin users'], ['/admin/account', 'Change password']] as [$p, $n]) {
     $r = $a->get($p); check("admin GET $p", $r['s'] === 200 && stripos($r['b'], $n) !== false, $r['s']);
 }
 $AT = csrf($a->get('/admin')['b']);
 /* role-based access: staff cannot open product/settings pages */
 $s = new Http($BASE, false); $lt2 = formCsrf($s->get('/admin/login')['b']); $s->post('/admin/login', ['_csrf' => $lt2, 'email' => 'staff@example.com', 'password' => 'StaffSecret123']);
 check('staff can open orders', $s->get('/admin/orders')['s'] === 200);
-foreach (['/admin/products', '/admin/customize', '/admin/smtp', '/admin/ai-image', '/admin/users'] as $p) { $r = $s->get($p); check("staff blocked from $p", $r['s'] === 403 || $r['s'] === 302, $r['s']); }
+foreach (['/admin/products', '/admin/customize', '/admin/smtp', '/admin/users'] as $p) { $r = $s->get($p); check("staff blocked from $p", $r['s'] === 403 || $r['s'] === 302, $r['s']); }
 /* unified order management */
 check('filter source=voice_order finds order', str_contains($a->get('/admin/orders?source=voice_order&status=placed')['b'], $ref));
 check('filter source=cart excludes voice order', !str_contains($a->get('/admin/orders?source=cart')['b'], $ref));
@@ -193,26 +193,15 @@ $a->post('/admin/products/' . sid('TST901') . '/archive', ['_csrf' => $AT]); che
 $cz = ['_csrf' => $AT, 'brand_name' => 'Test Brand', 'color_primary' => '#112233', 'color_secondary' => '#445566', 'color_accent' => '#778899', 'color_bg' => '#FFFFFF', 'color_text' => '#111111', 'color_button' => '#0A0B0C', 'color_button_text' => '#FFFFFF', 'header_style' => 'white', 'footer_style' => 'white', 'delivery_charge' => '80', 'free_delivery_above' => '2000', 'min_order_amount' => '0', 'bulk_discount_min' => '0', 'bulk_discount_percent' => '0', 'max_qty_per_item' => '500', 'restricted_states' => '', 'payment_cod_enabled' => '1', 'payment_cod_label' => 'COD', 'show_offers' => '1'];
 $a->post('/admin/customize', $cz); $b = (new Http($BASE))->get('/')['b']; check('customization propagates (colours + brand)', str_contains($b, '--c-primary:#112233') && str_contains($b, 'Test Brand') && str_contains($b, '--c-button:#0A0B0C'));
 $a->post('/admin/customize', ['color_primary' => 'red;}</style><script>x</script>'] + $cz); $b = (new Http($BASE))->get('/')['b']; check('malicious colour not injected', !str_contains($b, '<script>x</script>') && str_contains($b, '--c-primary:#112233'));
-/* honest AI + SMTP failures */
-$j = $a->json('POST', '/admin/ai-image/generate', ['prompt' => 'a firework banner', 'aspect' => 'landscape'], ['X-CSRF-Token' => $AT]); check('AI without key -> honest error', !($j['ok'] ?? true) && str_contains($j['message'] ?? '', 'not configured'), $j);
-check('AI failure recorded in history', (int)DB::val("SELECT COUNT(*) FROM ai_image_history WHERE status='failed'") >= 0);
+/* honest SMTP failure */
 check('SMTP test reports failure honestly', ($b = $a->post('/admin/smtp/test', ['_csrf' => $AT, 'test_to' => 'a@b.com'])['b']) && str_contains($b, 'Test failed') && str_contains($b, 'not configured'));
-/* uploads */
-$tmp = sys_get_temp_dir() . '/fc_up_' . getmypid();
-$up = function (string $name, string $mime, string $bytes) use ($a, $AT, $tmp) { file_put_contents($tmp, $bytes); return $a->post('/admin/media/upload', ['_csrf' => $AT, 'files[0]' => new CURLFile($tmp, $mime, $name)])['b']; };
-check('PHP file upload rejected', str_contains($up('evil.php', 'image/jpeg', '<?php system($_GET[0]); ?>'), 'Only JPG, PNG or WebP'));
-check('fake image with PHP payload rejected', ($b = $up('x.jpg', 'image/jpeg', "GIF89a<?php evil(); ?>")) && (str_contains($b, 'Only JPG') || str_contains($b, 'Invalid')));
-$im = imagecreatetruecolor(8, 8); ob_start(); imagepng($im); $png = ob_get_clean();
-check('valid PNG accepted & re-encoded', str_contains($up('ok.png', 'image/png', $png), 'uploaded'));
+/* Excel template / import */
+$x = $a->get('/admin/products/template'); check('Excel template downloads as xlsx', $x['s'] === 200 && str_starts_with($x['b'], 'PK'), $x['s']);
+$x = $a->get('/admin/products/template?blank=1'); check('blank Excel template downloads', $x['s'] === 200 && str_starts_with($x['b'], 'PK'));
+$tmp = sys_get_temp_dir() . '/fc_imp_' . getmypid() . '.csv'; file_put_contents($tmp, "SKU,Product Name,Category,Original Price,Selling Price,Stock\nXLS-1,Excel Item,Flower Pots,100,80,7\n");
+$r = $a->post('/admin/products/import', ['_csrf' => $AT, 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]); check('Excel/CSV import adds product', str_contains($r['b'], 'New products added') && (int)DB::val("SELECT stock FROM products WHERE sku='XLS-1'") === 7);
+file_put_contents($tmp, "SKU,Stock\nXLS-1,12\n"); $a->post('/admin/products/import', ['_csrf' => $AT, 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]); check('Excel/CSV import updates stock only', (int)DB::val("SELECT stock FROM products WHERE sku='XLS-1'") === 12 && (float)DB::val("SELECT selling_price FROM products WHERE sku='XLS-1'") == 80.0);
 @unlink($tmp);
-$items = $a->json('GET', '/admin/media/json')['items'] ?? []; check('media library lists upload', count($items) === 1);
-check('uploaded file is not executable (.png/.jpg/.webp only)', (bool)preg_match('/\.(png|jpg|webp)$/', $items[0]['path'] ?? ''));
-$a->post('/admin/banners/save', ['_csrf' => $AT, 'id' => '0', 'title' => 'Scheduled Banner', 'is_active' => '1', 'display_order' => '9', 'image_lib' => $items[0]['path'], 'starts_at' => '2099-01-01T00:00']);
-check('future-dated banner not shown', !str_contains((new Http($BASE))->get('/')['b'], 'Scheduled Banner'));
-$a->post('/admin/banners/save', ['_csrf' => $AT, 'id' => '0', 'title' => 'Live Banner', 'is_active' => '1', 'display_order' => '0', 'image_lib' => $items[0]['path']]);
-check('new active banner on homepage', str_contains((new Http($BASE))->get('/')['b'], 'Live Banner'));
-check('media in use shows In use', str_contains($a->get('/admin/media')['b'], 'In use'));
-$mid = (int)DB::val('SELECT id FROM media_library LIMIT 1'); check('in-use media cannot be deleted', str_contains($a->post("/admin/media/$mid/delete", ['_csrf' => $AT])['b'], 'in use'));
 /* ---------- FULL VOICE JOURNEY: ONE sentence -> checkout -> tracking -> admin -> cancel ---------- */
 [$jv, $Hj] = fresh(); $want = ['FP101' => 5, 'SP201' => 2, 'GC301' => 3, 'GB801' => 1, 'SC501' => 4]; $sb = []; foreach ($want as $k0 => $_) $sb[$k0] = stock($k0);
 $j = $jv->json('POST', '/api/voice/parse', ['text' => 'add five flower pots, two sparklers, three ground chakras, one family gift box and four lakshmi crackers', 'lang' => 'en'], $Hj);

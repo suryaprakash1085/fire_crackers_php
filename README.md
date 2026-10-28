@@ -1,6 +1,6 @@
 # Firecrackers E-Commerce Platform
 
-Core PHP 8 (simple MVC) · MySQL/MariaDB (PDO) · Tailwind CSS · vanilla JS · PHPMailer (bundled) · OpenAI image API.
+Core PHP 8 (simple MVC) · MySQL/MariaDB (PDO) · Tailwind CSS · vanilla JS · PHPMailer (bundled).
 Light, festive, fully responsive storefront + secure Admin Panel. Guest checkout (no customer login/registration).
 
 > **Windows / XAMPP?** Read `docs/WINDOWS_XAMPP.md` — double-click `setup-windows.bat`, then `start.bat`. (`'php' is not recognized` is fixed by the included `console.bat`.)
@@ -29,6 +29,9 @@ Shop: http://127.0.0.1:8000 · Admin: http://127.0.0.1:8000/admin. `install` cre
 * Windows: use `console.bat migrate` (or `C:\xampp\php\php.exe bin/console migrate`) if `php` is not on PATH.
 * Upgrading: run `php bin/console migrate` (adds `003_clean_light_theme`, which only changes the background colour if you never customised it).
 
+## Excel product import / export (Admin → Products → *Excel import / export*)
+Download the sheet (all products, or a blank template), edit in Excel, upload it back: matching products (by **ID**, else **SKU**) are **updated**, rows without a match are **added**. Empty cell = keep current value (`-` clears a text field). Validation per row; bad rows are skipped and listed with the Excel row number, good rows are saved. Needs PHP `zip` extension for `.xlsx` (`.csv` also accepted). Images/videos are still added on the product page. The Media Library and AI Image pages were removed (images are uploaded directly in each form).
+
 ## Migration & seed commands (`php bin/console …`)
 | Command | What it does |
 |---|---|
@@ -46,14 +49,14 @@ Adding a migration: create `database/migrations/003_your_change.sql` (one statem
 ## Routes
 Customer: `/`, `/about`, `/services`, `/products`, `/product-details.php?id=123`, `/quick-order`, `/voice-order`, `/cart`, `/checkout`, `/order-success`, `/track`, `/contact`, `/policy/{privacy|terms|shipping|refund|safety}`.
 Primary nav = Home · About Us · Services · Products · Quick Order · Voice Order · Shopping Cart. Policies/Track/Contact are in the footer. No search-results, login or registration pages exist.
-Admin: `/admin` (Dashboard, Orders, Products, Categories, Banners, Services, Website Content, Enquiries, Media Library, AI Image Generator, App Customization, Email Settings, Admin Users).
+Admin: `/admin` (Dashboard, Orders, Products, Categories, Banners, Services, Website Content, Enquiries, App Customization, Email Settings, Admin Users).
 
 ## Architecture
 ```
 public/            web root: index.php (front controller), assets/, uploads/
 app/Core/          Env, DB (PDO), Router, View, Controller, Auth, RateLimiter
 app/Models/        Product, Category, Page, Setting
-app/Services/      CartService, OrderService, VoiceParser, MailService, MediaService, AiImageService
+app/Services/      CartService, OrderService, VoiceParser, MailService, MediaService, ProductSheet (Excel), Xlsx
 app/Controllers/   public controllers + Admin/ controllers
 app/Views/         layouts, partials, front/, admin/
 database/          migrations/*.sql, seeders/*.php (+ seeders/demo/), and ready-to-import schema.sql / seed.sql / demo_seed.sql
@@ -72,4 +75,4 @@ Key design points
 No online gateway is wired in (none was specified). Checkout offers configurable **pay on delivery** and **UPI/bank transfer after confirmation**; every order is stored as `payment pending` and is only marked paid when an admin records it. Card data is never handled.
 
 ## More docs
-`docs/WINDOWS_XAMPP.md` · `docs/COMMANDS.md` · `docs/DEPLOYMENT.md` · `docs/SMTP_SETUP.md` · `docs/AI_SETUP.md` · `docs/TESTING.md` · `docs/TROUBLESHOOTING.md`
+`docs/WINDOWS_XAMPP.md` · `docs/COMMANDS.md` · `docs/DEPLOYMENT.md` · `docs/SMTP_SETUP.md` · `docs/TESTING.md` · `docs/TROUBLESHOOTING.md`

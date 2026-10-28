@@ -1,6 +1,6 @@
 <?php
 use App\Controllers\{HomeController, PageController, ProductController, ApiController, ShopController};
-use App\Controllers\Admin\{AuthController, DashboardController, ProductsController, CrudController, OrdersController, EnquiriesController, ContentController, MediaController, AiImageController, SettingsController, AdminUsersController, ReportsController, CompanyController};
+use App\Controllers\Admin\{AuthController, DashboardController, ProductsController, CrudController, OrdersController, EnquiriesController, ContentController, SettingsController, AdminUsersController, ReportsController, CompanyController};
 
 $r = $router;
 $r->get('/', [HomeController::class, 'index']);
@@ -39,6 +39,9 @@ $r->get('/admin/dashboard', [DashboardController::class, 'index']);
 
 $r->get('/admin/products', [ProductsController::class, 'index']);
 $r->get('/admin/products/create', [ProductsController::class, 'form']);
+$r->get('/admin/products/template', [ProductsController::class, 'template']);
+$r->get('/admin/products/import', [ProductsController::class, 'importForm']);
+$r->post('/admin/products/import', [ProductsController::class, 'importSubmit']);
 $r->get('/admin/products/{id}/edit', [ProductsController::class, 'form']);
 $r->get('/admin/products/{id}', [ProductsController::class, 'show']);
 $r->post('/admin/products/save', [ProductsController::class, 'save']);
@@ -73,15 +76,6 @@ $r->get('/admin/content', [ContentController::class, 'index']);
 $r->post('/admin/content/page', [ContentController::class, 'savePage']);
 $r->post('/admin/content/settings', [ContentController::class, 'saveSettings']);
 
-$r->get('/admin/media', [MediaController::class, 'index']);
-$r->get('/admin/media/json', [MediaController::class, 'listJson']);
-$r->post('/admin/media/upload', [MediaController::class, 'upload']);
-$r->post('/admin/media/{id}/delete', [MediaController::class, 'delete']);
-
-$r->get('/admin/ai-image', [AiImageController::class, 'index']);
-$r->post('/admin/ai-image/generate', [AiImageController::class, 'generate']);
-$r->get('/admin/ai-image/{id}/file', [AiImageController::class, 'file']);
-$r->post('/admin/ai-image/{id}/save', [AiImageController::class, 'save']);
 
 $r->get('/admin/customize', [SettingsController::class, 'customize']);
 $r->post('/admin/customize', [SettingsController::class, 'saveCustomize']);

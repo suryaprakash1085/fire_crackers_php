@@ -2,7 +2,7 @@
 $role = $admin['role'] ?? 'staff'; $lvl = ['staff' => 1, 'admin' => 2, 'superadmin' => 3][$role];
 $path = '/' . trim(rawurldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)), '/'); if (base_path() !== '' && str_starts_with($path, base_path())) $path = substr($path, strlen(base_path()));
 $menu = [['/admin', 'Dashboard', 'layout-dashboard', 1], ['/admin/orders', 'Orders', 'receipt', 1], ['/admin/reports', 'Reports', 'chart-column', 1], ['/admin/products', 'Products', 'package', 2], ['/admin/categories', 'Categories', 'tags', 2], ['/admin/banners', 'Banners', 'image', 2],
-  ['/admin/services', 'Services', 'concierge-bell', 2], ['/admin/content', 'Website Content', 'file-text', 2], ['/admin/enquiries', 'Enquiries', 'inbox', 1], ['/admin/media', 'Media Library', 'images', 2], ['/admin/ai-image', 'AI Image Generator', 'wand-sparkles', 2],
+  ['/admin/services', 'Services', 'concierge-bell', 2], ['/admin/content', 'Website Content', 'file-text', 2], ['/admin/enquiries', 'Enquiries', 'inbox', 1],
   ['/admin/company', 'Company Profile', 'building-2', 2], ['/admin/customize', 'App Customization', 'palette', 2], ['/admin/smtp', 'Email Settings', 'mail', 2], ['/admin/users', 'Admin Users', 'users', 3]];
 $active = fn($h) => $h === '/admin' ? in_array($path, ['/admin', '/admin/dashboard']) : str_starts_with($path, $h);
 ?><!doctype html><html lang="en" class="dark"><head><script>try{if(localStorage.getItem("fc_admin_theme")==="light")document.documentElement.classList.remove("dark")}catch(e){}</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title><?= e($title ?? 'Admin') ?> · Admin</title>
@@ -31,6 +31,5 @@ $active = fn($h) => $h === '/admin' ? in_array($path, ['/admin', '/admin/dashboa
     <?= $content ?>
   </main>
 </div>
-<div id="media-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl"><div class="flex items-center justify-between p-4 border-b"><b>Choose from Media Library</b><button type="button" data-close class="p-1 text-xl leading-none" aria-label="Close">×</button></div><div data-grid class="p-4 overflow-auto grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3"></div></div></div>
 <script>document.addEventListener('DOMContentLoaded',()=>window.lucide&&lucide.createIcons())</script>
 </body></html>
