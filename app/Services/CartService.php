@@ -10,7 +10,7 @@ final class CartService {
 
     public static function add(int $id, int $qty, string $source = 'cart'): array {
         $max = max(1, (int)setting('max_qty_per_item', 500));
-        $p = DB::one('SELECT id,name,stock,status FROM products WHERE id=?', [$id]);
+        $p = DB::one('SELECT p.id,p.name,p.stock,p.status FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=? AND c.is_active=1', [$id]);
         if (!$p || $p['status'] !== 'active') return ['ok' => false, 'status' => 'unavailable', 'message' => 'Product not available.', 'added' => 0];
         if ($qty < 1) return ['ok' => false, 'status' => 'invalid', 'message' => 'Quantity must be at least 1.', 'added' => 0, 'name' => $p['name']];
         $have = (int)(self::raw()[$id] ?? 0);

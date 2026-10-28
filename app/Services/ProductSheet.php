@@ -42,7 +42,7 @@ final class ProductSheet {
         if ($withProducts) {
             $where = $includeArchived ? '' : "WHERE p.status<>'archived'";
             foreach (DB::all("SELECT p.*, c.name category_name FROM products p JOIN categories c ON c.id=p.category_id $where ORDER BY c.name, p.name") as $p) {
-                $rows[] = [(int)$p['id'], $p['sku'], $p['name'], $p['name_ta'], $p['category_name'], (float)$p['original_price'], (float)$p['selling_price'], (int)$p['stock'], (int)$p['stock'], (int)$p['low_stock_threshold'],
+                $rows[] = [(int)$p['id'], (string)$p['sku'], $p['name'], $p['name_ta'], $p['category_name'], (float)$p['original_price'], (float)$p['selling_price'], (int)$p['stock'], (int)$p['stock'], (int)$p['low_stock_threshold'],
                     $p['status'], $p['is_featured'] ? 'Yes' : 'No', $p['is_popular'] ? 'Yes' : 'No', $p['description'], $p['safety_notes'], $p['aliases']];
             }
         }
@@ -62,11 +62,12 @@ final class ProductSheet {
             ['4. On existing products, an EMPTY cell means "keep the current value". To clear a text field, type a single dash  -'],
             ['5. Category must match an existing category name (pick from the dropdown). Status: active / inactive / archived. Featured / Popular: Yes or No.'],
             ['6. Selling Price cannot be more than Original Price. Stock at export is a read-only snapshot used to detect changes since download.'],
-            ['7. Replace mode: Stock is the new total. Add mode: replace the exported total with a signed adjustment (+/-) applied to current stock.'],
-            ['8. Images and videos are not part of this sheet – add them from the product page. New products from this sheet are created without images.'],
-            ['9. Up to ' . self::MAX_ROWS . ' rows per upload. Rows with errors are skipped and listed after the upload; the good rows are saved.']];
+            ['7. Replace mode: Stock is the new total. If Stock at export is present, new_stock = current_stock + (sheet_stock - stock_at_export).'],
+            ['8. Add mode: if Stock equals Stock at export, change is 0. Otherwise Stock is added as a signed adjustment (+/-).'],
+            ['9. Images and videos are not part of this sheet – add them from the product page. New products from this sheet are created without images.'],
+            ['10. Up to ' . self::MAX_ROWS . ' rows per upload. A preview step lets you inspect changes before confirming.']];
         return Xlsx::build([
-            ['name' => 'Products', 'rows' => $rows, 'widths' => array_column(self::COLS, 1), 'validations' => [
+            ['name' => 'Products', 'rows' => $rows, 'widths' => array_column(self::COLS, 1), 'textCols' => [$col('sku')], 'validations' => [
                 ['col' => $col('category'), 'list' => 'Lists!$A$2:$A$' . max(2, count($cats) + 1), 'rows' => $n, 'error' => 'Choose an existing category.'],
                 ['col' => $col('status'), 'list' => '"active,inactive,archived"', 'rows' => $n],
                 ['col' => $col('is_featured'), 'list' => '"Yes,No"', 'rows' => $n],
@@ -112,128 +113,462 @@ final class ProductSheet {
         return [$out, array_values($map)];
     }
 
-    private static function num(string $v): ?float { $v = preg_replace('/[^0-9.\-]/', '', str_replace(',', '', $v)); return ($v === '' || !is_numeric($v)) ? null : (float)$v; }
-    private static function yn(string $v): ?int { $v = mb_strtolower($v); if (in_array($v, ['yes', 'y', '1', 'true', 'x', 'ok'], true)) return 1; if (in_array($v, ['no', 'n', '0', 'false'], true)) return 0; return null; }
+    /**
+     * Strict numeric parsing: only strip currency symbols (\p{Sc}, rs, inr), commas, and spaces.
+     * Rejects values like "12abc" and "1E3".
+     */
+    private static function num(string $v): ?float {
+        $v = trim($v);
+        if ($v === '') return null;
+        $clean = preg_replace('/^\s*(?:rs\.?|inr)\s*/iu', '', $v);
+        $clean = preg_replace('/[\p{Sc},\s]/u', '', $clean);
+        if ($clean === '' || !preg_match('/^-?(?:\d+(?:\.\d+)?|\.\d+)$/', $clean)) {
+            return null;
+        }
+        return (float)$clean;
+    }
 
     /**
-     * @return array{added:int,updated:int,unchanged:int,errors:array<array{line:int,sku:string,msg:string}>,warnings:array<array{line:int,sku:string,msg:string}>,newCats:int}
+     * Strict integer ID parser: accepts "12" and "12.0", never strips dots.
+     * Rejects values like "12abc", "1E3", "12.5", "-1".
+     * Returns null for empty, positive int for valid, or -1 for invalid.
      */
-    public static function import(string $tmp, string $origName, bool $createCategories, string $stockMode = 'replace'): array {
+    private static function parseId(string $v): ?int {
+        $v = trim($v);
+        if ($v === '') return null;
+        if (preg_match('/^\d+$/', $v)) {
+            $id = (int)$v;
+            return $id > 0 ? $id : -1;
+        }
+        if (preg_match('/^(\d+)\.0+$/', $v, $m)) {
+            $id = (int)$m[1];
+            return $id > 0 ? $id : -1;
+        }
+        return -1;
+    }
+
+    private static function yn(string $v): ?int {
+        $v = mb_strtolower($v);
+        if (in_array($v, ['yes', 'y', '1', 'true', 'x', 'ok'], true)) return 1;
+        if (in_array($v, ['no', 'n', '0', 'false'], true)) return 0;
+        return null;
+    }
+
+    /**
+     * Performs complete validation, row matching, delta calculations and generates dry-run plan.
+     * @return array{plan:array,previewRows:array,errors:array,warnings:array,newCats:int,addedCount:int,updatedCount:int,unchangedCount:int,cats:array}
+     */
+    private static function plan(string $tmp, string $origName, bool $createCategories, string $stockMode): array {
         if (!in_array($stockMode, ['replace', 'add'], true)) throw new \RuntimeException('Choose Replace or Add (+/-) for stock mode.');
         [$rows, $cols] = self::load($tmp, $origName);
         if (!$rows) throw new \RuntimeException('No product rows found in the file.');
-        $cats = []; foreach (DB::all('SELECT id,name FROM categories') as $c) $cats[mb_strtolower(trim($c['name']))] = (int)$c['id'];
-        $res = ['added' => 0, 'updated' => 0, 'unchanged' => 0, 'errors' => [], 'warnings' => [], 'newCats' => 0];
-        $pdo = DB::pdo(); $seenSku = []; $seenId = []; $plan = [];
+
+        $cats = [];
+        $catsById = [];
+        foreach (DB::all('SELECT id,name,is_active FROM categories') as $c) {
+            $cats[mb_strtolower(trim($c['name']))] = ['id' => (int)$c['id'], 'name' => $c['name'], 'is_active' => (int)$c['is_active']];
+            $catsById[(int)$c['id']] = ['id' => (int)$c['id'], 'name' => $c['name'], 'is_active' => (int)$c['is_active']];
+        }
+
+        $errors = []; $warnings = [];
+        $seenSku = []; $seenId = []; $plan = []; $previewRows = [];
+        $newCatsCount = 0; $addedCount = 0; $updatedCount = 0; $unchangedCount = 0;
 
         foreach ($rows as ['line' => $line, 'd' => $d]) {
-            $err = function (string $m) use (&$res, $line, $d) { $res['errors'][] = ['line' => $line, 'sku' => ($d['sku'] ?? '') !== '' ? $d['sku'] : ($d['name'] ?? ''), 'msg' => $m]; };
-            $sku = strtoupper(trim($d['sku'] ?? '')); $id = (int)preg_replace('/\D/', '', $d['id'] ?? '');
-            if ($id) {
-                if (isset($seenId[$id])) { $err("ID $id appears more than once in the file (first on row {$seenId[$id]})."); continue; }
+            $rowErrors = []; $rowWarnings = [];
+            $rawId = trim((string)($d['id'] ?? ''));
+            $id = self::parseId($rawId);
+            $rawSku = trim((string)($d['sku'] ?? ''));
+            $sku = strtoupper($rawSku);
+            $skuOrName = $sku !== '' ? $sku : (string)($d['name'] ?? "Row $line");
+
+            if ($id === -1) {
+                $msg = "ID \"$rawId\" is invalid. It must be a positive whole number (e.g. 12 or 12.0).";
+                $errors[] = ['line' => $line, 'sku' => $skuOrName, 'msg' => $msg];
+                $previewRows[] = ['line' => $line, 'sku' => $skuOrName, 'name' => $d['name'] ?? '', 'action' => 'error', 'changes' => [], 'errors' => [$msg], 'warnings' => []];
+                continue;
+            }
+
+            if ($id !== null) {
+                if (isset($seenId[$id])) {
+                    $msg = "ID $id appears more than once in the file (first on row {$seenId[$id]}).";
+                    $errors[] = ['line' => $line, 'sku' => $skuOrName, 'msg' => $msg];
+                    $previewRows[] = ['line' => $line, 'sku' => $skuOrName, 'name' => $d['name'] ?? '', 'action' => 'error', 'changes' => [], 'errors' => [$msg], 'warnings' => []];
+                    continue;
+                }
                 $seenId[$id] = $line;
             }
+
             $cur = null;
-            if ($id) { $cur = DB::one('SELECT * FROM products WHERE id=?', [$id]); if (!$cur) { $err("ID $id does not exist. Clear the ID to add it as a new product."); continue; } }
-            elseif ($sku !== '') $cur = DB::one('SELECT * FROM products WHERE sku=?', [$sku]);
-            if ($sku === '' && $cur) $sku = $cur['sku'];
-            if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{1,59}$/', $sku)) { $err('SKU: 2–60 letters, numbers, - or _.'); continue; }
-            if (isset($seenSku[$sku])) { $err("SKU $sku appears twice in the file (first on row {$seenSku[$sku]})."); continue; }
+            if ($id !== null) {
+                $cur = DB::one('SELECT * FROM products WHERE id=?', [$id]);
+                if (!$cur) {
+                    $msg = "ID $id does not exist. Clear the ID to add it as a new product.";
+                    $errors[] = ['line' => $line, 'sku' => $skuOrName, 'msg' => $msg];
+                    $previewRows[] = ['line' => $line, 'sku' => $skuOrName, 'name' => $d['name'] ?? '', 'action' => 'error', 'changes' => [], 'errors' => [$msg], 'warnings' => []];
+                    continue;
+                }
+            } elseif ($sku !== '') {
+                $cur = DB::one('SELECT * FROM products WHERE sku=?', [$sku]);
+            }
+
+            if ($sku === '' && $cur) $sku = (string)$cur['sku'];
+            if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{1,59}$/', $sku)) {
+                $msg = 'SKU: 2–60 letters, numbers, - or _.';
+                $errors[] = ['line' => $line, 'sku' => $skuOrName, 'msg' => $msg];
+                $previewRows[] = ['line' => $line, 'sku' => $skuOrName, 'name' => $d['name'] ?? '', 'action' => 'error', 'changes' => [], 'errors' => [$msg], 'warnings' => []];
+                continue;
+            }
+            if (isset($seenSku[$sku])) {
+                $msg = "SKU $sku appears twice in the file (first on row {$seenSku[$sku]}).";
+                $errors[] = ['line' => $line, 'sku' => $sku, 'msg' => $msg];
+                $previewRows[] = ['line' => $line, 'sku' => $sku, 'name' => $d['name'] ?? '', 'action' => 'error', 'changes' => [], 'errors' => [$msg], 'warnings' => []];
+                continue;
+            }
             $dup = DB::val('SELECT id FROM products WHERE sku=?' . ($cur ? ' AND id<>?' : ''), $cur ? [$sku, $cur['id']] : [$sku]);
-            if ($dup) { $err("SKU $sku is already used by another product."); continue; }
+            if ($dup) {
+                $msg = "SKU $sku is already used by another product.";
+                $errors[] = ['line' => $line, 'sku' => $sku, 'msg' => $msg];
+                $previewRows[] = ['line' => $line, 'sku' => $sku, 'name' => $d['name'] ?? '', 'action' => 'error', 'changes' => [], 'errors' => [$msg], 'warnings' => []];
+                continue;
+            }
             $seenSku[$sku] = $line;
 
             $new = []; $bad = null;
-            $txt = function (string $k, int $max) use ($d, $cur, &$new) {
+            $txt = function (string $k, int $max) use ($d, &$new) {
                 if (!array_key_exists($k, $d) || $d[$k] === '') return;
                 $new[$k] = $d[$k] === '-' ? null : mb_substr($d[$k], 0, $max);
             };
+
             // name
             if (($d['name'] ?? '') !== '') $new['name'] = mb_substr($d['name'], 0, 190);
             elseif (!$cur) $bad = 'Product Name is required for a new product.';
             if (!$bad && isset($new['name']) && mb_strlen($new['name']) < 2) $bad = 'Product Name is too short.';
             $txt('name_ta', 190); $txt('description', 20000); $txt('safety_notes', 20000); $txt('aliases', 20000);
+
             // category
             if (!$bad) {
                 $cn = trim($d['category'] ?? '');
                 if ($cn !== '') {
                     $key = mb_strtolower($cn);
-                    if (isset($cats[$key])) $new['category_id'] = $cats[$key];
-                    elseif ($createCategories) { $new['_newcat'] = $cn; }
-                    else $bad = "Category \"$cn\" does not exist. Pick one from the dropdown, or tick “Create missing categories”.";
-                } elseif (!$cur) $bad = 'Category is required for a new product.';
+                    if (isset($cats[$key])) {
+                        $new['category_id'] = $cats[$key]['id'];
+                        if (empty($cats[$key]['is_active'])) {
+                            $wMsg = "Category \"{$cats[$key]['name']}\" is inactive (is_active=0).";
+                            $warnings[] = ['line' => $line, 'sku' => $sku, 'msg' => $wMsg];
+                            $rowWarnings[] = $wMsg;
+                        }
+                    } elseif ($createCategories) {
+                        $new['_newcat'] = $cn;
+                    } else {
+                        $bad = "Category \"$cn\" does not exist. Pick one from the dropdown, or tick “Create missing categories”.";
+                    }
+                } elseif (!$cur) {
+                    $bad = 'Category is required for a new product.';
+                } elseif ($cur) {
+                    $catId = (int)$cur['category_id'];
+                    if (isset($catsById[$catId]) && empty($catsById[$catId]['is_active'])) {
+                        $wMsg = "Category \"{$catsById[$catId]['name']}\" is inactive (is_active=0).";
+                        $warnings[] = ['line' => $line, 'sku' => $sku, 'msg' => $wMsg];
+                        $rowWarnings[] = $wMsg;
+                    }
+                }
             }
+
             // prices
             if (!$bad) {
-                $o = ($d['original_price'] ?? '') !== '' ? self::num($d['original_price']) : null; $s = ($d['selling_price'] ?? '') !== '' ? self::num($d['selling_price']) : null;
-                if (($d['original_price'] ?? '') !== '' && $o === null) $bad = 'Original Price is not a number.';
-                elseif (($d['selling_price'] ?? '') !== '' && $s === null) $bad = 'Selling Price is not a number.';
+                $o = ($d['original_price'] ?? '') !== '' ? self::num($d['original_price']) : null;
+                $s = ($d['selling_price'] ?? '') !== '' ? self::num($d['selling_price']) : null;
+                if (($d['original_price'] ?? '') !== '' && $o === null) $bad = 'Original Price is not a valid number.';
+                elseif (($d['selling_price'] ?? '') !== '' && $s === null) $bad = 'Selling Price is not a valid number.';
                 else {
-                    $o = $o ?? ($cur ? (float)$cur['original_price'] : null); $s = $s ?? ($cur ? (float)$cur['selling_price'] : null);
+                    $o = $o ?? ($cur ? (float)$cur['original_price'] : null);
+                    $s = $s ?? ($cur ? (float)$cur['selling_price'] : null);
                     if ($o === null || $s === null) $bad = 'Original Price and Selling Price are required for a new product.';
                     elseif ($o <= 0 || $o > 9999999) $bad = 'Original Price must be above 0.';
                     elseif ($s <= 0 || $s > $o) $bad = 'Selling Price must be above 0 and not more than the Original Price.';
-                    else { $new['original_price'] = round($o, 2); $new['selling_price'] = round($s, 2); $new['discount_percent'] = round(($o - $s) / $o * 100, 2); }
-                }
-            }
-            // Warn when the stock snapshot from export no longer matches current stock.
-            if ($cur && ($d['stock_baseline'] ?? '') !== '') {
-                $baseline = self::num($d['stock_baseline']);
-                if ($baseline !== null && floor($baseline) == $baseline && (int)$baseline !== (int)$cur['stock']) {
-                    $res['warnings'][] = ['line' => $line, 'sku' => $sku, 'msg' => 'Stock changed by orders after this file was downloaded. Exported stock was ' . (int)$baseline . '; current stock is ' . (int)$cur['stock'] . '.'];
-                }
-            }
-            // Stock can be replaced by an absolute total or adjusted by a signed delta.
-            if (!$bad) {
-                if (($d['stock'] ?? '') !== '') {
-                    $stockValue = self::num($d['stock']);
-                    if ($stockValue === null || floor($stockValue) != $stockValue) $bad = 'Stock must be a whole number.';
-                    elseif ($stockMode === 'add' && abs($stockValue) > 10000000) $bad = 'Stock adjustment must be between -10,000,000 and 10,000,000.';
-                    elseif ($stockMode === 'replace' && ($stockValue < 0 || $stockValue > 10000000)) $bad = 'Stock must be a whole number (0 or more).';
                     else {
-                        $nextStock = $stockMode === 'add' ? (int)($cur['stock'] ?? 0) + (int)$stockValue : (int)$stockValue;
-                        if ($nextStock < 0 || $nextStock > 10000000) $bad = 'The stock change would result in a value outside 0 to 10,000,000.';
-                        else $new['stock'] = $nextStock;
+                        $new['original_price'] = round($o, 2);
+                        $new['selling_price'] = round($s, 2);
+                        $new['discount_percent'] = round(($o - $s) / $o * 100, 2);
                     }
-                } elseif (!$cur) $new['stock'] = 0;
+                }
+            }
+
+            // stock and baseline
+            $hasStock = ($d['stock'] ?? '') !== '';
+            $sheetStock = null;
+            if ($hasStock) {
+                $parsedStock = self::num($d['stock']);
+                if ($parsedStock === null || floor($parsedStock) != $parsedStock) {
+                    $bad = 'Stock must be a whole number.';
+                } else {
+                    $sheetStock = (int)$parsedStock;
+                }
+            }
+
+            $hasBaseline = ($d['stock_baseline'] ?? '') !== '';
+            $baseline = null;
+            if ($hasBaseline) {
+                $parsedBaseline = self::num($d['stock_baseline']);
+                if ($parsedBaseline === null || floor($parsedBaseline) != $parsedBaseline) {
+                    $bad = 'Stock at export must be a whole number.';
+                } else {
+                    $baseline = (int)$parsedBaseline;
+                }
+            }
+
+            // Stock baseline warnings & calculations
+            if (!$bad) {
+                if ($cur && $hasBaseline && $baseline !== null && (int)$cur['stock'] !== $baseline) {
+                    $wMsg = 'Stock changed by orders after this file was downloaded. Exported stock was ' . $baseline . '; current stock is ' . (int)$cur['stock'] . '.';
+                    $warnings[] = ['line' => $line, 'sku' => $sku, 'msg' => $wMsg];
+                    $rowWarnings[] = $wMsg;
+                }
+
+                if ($cur && $hasStock) {
+                    if ($stockMode === 'replace') {
+                        if ($sheetStock < 0 || $sheetStock > 10000000) {
+                            $bad = 'Stock must be a whole number (0 or more).';
+                        } elseif ($hasBaseline && $baseline !== null) {
+                            $delta = $sheetStock - $baseline;
+                            $calc = max(0, min(10000000, (int)$cur['stock'] + $delta));
+                            $new['stock'] = $calc;
+                        } else {
+                            $wMsg = 'Stock at export is missing. Overwriting stock directly with sheet value without race protection.';
+                            $warnings[] = ['line' => $line, 'sku' => $sku, 'msg' => $wMsg];
+                            $rowWarnings[] = $wMsg;
+                            $new['stock'] = max(0, min(10000000, $sheetStock));
+                        }
+                    } else { // add mode
+                        if (abs($sheetStock) > 10000000) {
+                            $bad = 'Stock adjustment must be between -10,000,000 and 10,000,000.';
+                        } else {
+                            // if Stock equals Stock at export, treat change as 0
+                            $adj = ($hasBaseline && $baseline !== null && $sheetStock === $baseline) ? 0 : $sheetStock;
+                            $calc = max(0, min(10000000, (int)$cur['stock'] + $adj));
+                            $new['stock'] = $calc;
+                        }
+                    }
+                } elseif (!$cur) {
+                    $new['stock'] = $hasStock ? max(0, min(10000000, $sheetStock)) : 0;
+                }
+
                 if (!$bad && ($d['low_stock_threshold'] ?? '') !== '') {
                     $n = self::num($d['low_stock_threshold']);
                     if ($n === null || $n < 0 || $n > 10000000 || floor($n) != $n) $bad = 'Low Stock Alert must be a whole number (0 or more).';
                     else $new['low_stock_threshold'] = (int)$n;
                 } elseif (!$cur) $new['low_stock_threshold'] = 10;
             }
+
             // status / flags
             if (!$bad) {
                 $st = mb_strtolower($d['status'] ?? '');
-                if ($st !== '') { if (in_array($st, ['active', 'inactive', 'archived'], true)) $new['status'] = $st; else $bad = 'Status must be active, inactive or archived.'; }
-                elseif (!$cur) $new['status'] = 'active';
+                if ($st !== '') {
+                    if (in_array($st, ['active', 'inactive', 'archived'], true)) $new['status'] = $st;
+                    else $bad = 'Status must be active, inactive or archived.';
+                } elseif (!$cur) $new['status'] = 'active';
             }
             foreach (['is_featured' => 'Featured', 'is_popular' => 'Popular'] as $k => $lab) {
                 if ($bad) break;
                 if (($d[$k] ?? '') === '') { if (!$cur) $new[$k] = 0; continue; }
-                $b = self::yn($d[$k]); if ($b === null) $bad = "$lab must be Yes or No."; else $new[$k] = $b;
+                $b = self::yn($d[$k]);
+                if ($b === null) $bad = "$lab must be Yes or No.";
+                else $new[$k] = $b;
             }
-            if ($bad) { $err($bad); continue; }
-            $plan[] = ['line' => $line, 'sku' => $sku, 'cur' => $cur, 'new' => $new];
+
+            // Requirement 8: Warn in the result if a new product has empty Tamil Name and Voice Aliases
+            if (!$bad && !$cur) {
+                $hasTa = !empty($new['name_ta']) && trim((string)$new['name_ta']) !== '';
+                $hasAliases = !empty($new['aliases']) && trim((string)$new['aliases']) !== '';
+                if (!$hasTa && !$hasAliases) {
+                    $wMsg = 'New product has empty Tamil Name and Voice Aliases. Consider adding them for voice order search.';
+                    $warnings[] = ['line' => $line, 'sku' => $sku, 'msg' => $wMsg];
+                    $rowWarnings[] = $wMsg;
+                }
+            }
+
+            if ($bad) {
+                $errors[] = ['line' => $line, 'sku' => $sku, 'msg' => $bad];
+                $previewRows[] = ['line' => $line, 'sku' => $sku, 'name' => $d['name'] ?? '', 'action' => 'error', 'changes' => [], 'errors' => [$bad], 'warnings' => $rowWarnings];
+                continue;
+            }
+
+            // Build preview changes description
+            $changes = [];
+            $action = 'unchanged';
+            if ($cur) {
+                foreach ($new as $k => $v) {
+                    $o = $cur[$k] ?? null;
+                    if ((string)$o !== (string)$v && !(is_numeric($o) && is_numeric($v) && (float)$o == (float)$v)) {
+                        $label = ucwords(str_replace('_', ' ', $k));
+                        if ($k === 'stock') {
+                            $diff = (int)$v - (int)$o;
+                            $diffStr = $diff >= 0 ? "+$diff" : "$diff";
+                            $changes[] = "Stock: $o → $v ($diffStr)";
+                        } elseif ($k === 'selling_price' || $k === 'original_price') {
+                            $changes[] = "$label: " . (float)$o . " → " . (float)$v;
+                        } else {
+                            $changes[] = "$label updated";
+                        }
+                    }
+                }
+                if ($sku !== $cur['sku']) $changes[] = "SKU: {$cur['sku']} → $sku";
+                if ($changes) {
+                    $action = 'update';
+                    $updatedCount++;
+                } else {
+                    $unchangedCount++;
+                }
+            } else {
+                $action = 'add';
+                $addedCount++;
+                if (isset($new['_newcat'])) $newCatsCount++;
+                $changes[] = 'New product: ' . ($new['name'] ?? $sku) . ' (Stock: ' . ($new['stock'] ?? 0) . ')';
+            }
+
+            $previewRows[] = [
+                'line' => $line,
+                'sku' => $sku,
+                'name' => $new['name'] ?? ($cur['name'] ?? ''),
+                'action' => $action,
+                'changes' => $changes,
+                'errors' => [],
+                'warnings' => $rowWarnings,
+            ];
+
+            $plan[] = [
+                'line' => $line,
+                'sku' => $sku,
+                'cur' => $cur,
+                'new' => $new,
+                'has_stock' => $hasStock,
+                'sheet_stock' => $sheetStock,
+                'has_baseline' => $hasBaseline,
+                'baseline' => $baseline,
+            ];
         }
 
+        return [
+            'plan' => $plan,
+            'previewRows' => $previewRows,
+            'errors' => $errors,
+            'warnings' => $warnings,
+            'newCats' => $newCatsCount,
+            'addedCount' => $addedCount,
+            'updatedCount' => $updatedCount,
+            'unchangedCount' => $unchangedCount,
+            'cats' => $cats,
+        ];
+    }
+
+    /**
+     * Dry run preview of an uploaded sheet.
+     * @return array{summary:array,rows:array,errors:array,warnings:array,newCats:int}
+     */
+    public static function preview(string $tmp, string $origName, bool $createCategories, string $stockMode = 'replace'): array {
+        $p = self::plan($tmp, $origName, $createCategories, $stockMode);
+        return [
+            'summary' => [
+                'added' => $p['addedCount'],
+                'updated' => $p['updatedCount'],
+                'unchanged' => $p['unchangedCount'],
+                'errors' => count($p['errors']),
+                'total' => count($p['previewRows']),
+            ],
+            'rows' => $p['previewRows'],
+            'errors' => $p['errors'],
+            'warnings' => $p['warnings'],
+            'newCats' => $p['newCats'],
+        ];
+    }
+
+    /**
+     * Executes the product import inside a transaction with row locking.
+     * @return array{added:int,updated:int,unchanged:int,errors:array<array{line:int,sku:string,msg:string}>,warnings:array<array{line:int,sku:string,msg:string}>,newCats:int}
+     */
+    public static function import(string $tmp, string $origName, bool $createCategories, string $stockMode = 'replace'): array {
+        $planned = self::plan($tmp, $origName, $createCategories, $stockMode);
+        $plan = $planned['plan'];
+        $cats = $planned['cats'];
+        $res = [
+            'added' => 0,
+            'updated' => 0,
+            'unchanged' => 0,
+            'errors' => $planned['errors'],
+            'warnings' => $planned['warnings'],
+            'newCats' => 0,
+        ];
+
+        $pdo = DB::pdo();
         try {
             $pdo->beginTransaction();
+
+            // Lock all existing products with SELECT ... FOR UPDATE like OrderService
+            $ids = [];
+            foreach ($plan as $p) {
+                if ($p['cur']) $ids[] = (int)$p['cur']['id'];
+            }
+            $ids = array_values(array_unique($ids));
+            sort($ids);
+            $liveProducts = [];
+            if ($ids) {
+                $in = implode(',', array_fill(0, count($ids), '?'));
+                $rows = DB::all("SELECT * FROM products WHERE id IN ($in) ORDER BY id FOR UPDATE", $ids);
+                foreach ($rows as $r) {
+                    $liveProducts[(int)$r['id']] = $r;
+                }
+            }
+
             foreach ($plan as $p) {
                 $new = $p['new'];
                 if (isset($new['_newcat'])) {
                     $key = mb_strtolower($new['_newcat']);
-                    if (!isset($cats[$key])) { $cats[$key] = self::createCategory($new['_newcat']); $res['newCats']++; }
-                    $new['category_id'] = $cats[$key]; unset($new['_newcat']);
+                    if (!isset($cats[$key])) {
+                        $cats[$key] = ['id' => self::createCategory($new['_newcat']), 'name' => $new['_newcat'], 'is_active' => 1];
+                        $res['newCats']++;
+                    }
+                    $new['category_id'] = $cats[$key]['id'];
+                    unset($new['_newcat']);
                 }
+
                 if ($p['cur']) {
+                    $live = $liveProducts[(int)$p['cur']['id']] ?? $p['cur'];
+
+                    // Stock recalculation against locked live row
+                    if ($p['has_stock']) {
+                        if ($stockMode === 'replace') {
+                            if ($p['has_baseline'] && $p['baseline'] !== null) {
+                                $delta = $p['sheet_stock'] - $p['baseline'];
+                                $new['stock'] = max(0, min(10000000, (int)$live['stock'] + $delta));
+                            } else {
+                                $new['stock'] = max(0, min(10000000, $p['sheet_stock']));
+                            }
+                        } else { // add mode
+                            $adj = ($p['has_baseline'] && $p['baseline'] !== null && $p['sheet_stock'] === $p['baseline']) ? 0 : $p['sheet_stock'];
+                            $new['stock'] = max(0, min(10000000, (int)$live['stock'] + $adj));
+                        }
+                    }
+
                     $changed = [];
-                    foreach ($new as $k => $v) { $o = $p['cur'][$k] ?? null; if ((string)$o !== (string)$v && !(is_numeric($o) && is_numeric($v) && (float)$o == (float)$v)) $changed[$k] = $v; }
-                    if ($p['sku'] !== $p['cur']['sku']) $changed['sku'] = $p['sku'];
-                    if ($changed) { DB::update('products', $changed, 'id=?', [$p['cur']['id']]); $res['updated']++; } else $res['unchanged']++;
+                    foreach ($new as $k => $v) {
+                        $o = $live[$k] ?? null;
+                        if ((string)$o !== (string)$v && !(is_numeric($o) && is_numeric($v) && (float)$o == (float)$v)) {
+                            $changed[$k] = $v;
+                        }
+                    }
+                    if ($p['sku'] !== $live['sku']) $changed['sku'] = $p['sku'];
+                    if ($changed) {
+                        DB::update('products', $changed, 'id=?', [$live['id']]);
+                        $res['updated']++;
+                    } else {
+                        $res['unchanged']++;
+                    }
                 } else {
-                    $new['sku'] = $p['sku']; $new['slug'] = self::uniqueSlug(slugify($new['name']) . '-' . strtolower($p['sku']));
-                    DB::insert('products', $new); $res['added']++;
+                    $new['sku'] = $p['sku'];
+                    $new['slug'] = self::uniqueSlug(slugify($new['name']) . '-' . strtolower($p['sku']));
+                    DB::insert('products', $new);
+                    $res['added']++;
                 }
             }
             $pdo->commit();
@@ -242,6 +577,7 @@ final class ProductSheet {
             log_error('product import: ' . $e->getMessage());
             throw new \RuntimeException('Import failed and nothing was saved (database error). Details are in storage/logs.');
         }
+
         return $res;
     }
 
@@ -250,6 +586,6 @@ final class ProductSheet {
     }
     private static function createCategory(string $name): int {
         $b = slugify($name); $s = $b; for ($i = 2; DB::val('SELECT 1 FROM categories WHERE slug=?', [$s]); $i++) $s = $b . '-' . $i;
-        return DB::insert('categories', ['name' => mb_substr($name, 0, 120), 'slug' => $s]);
+        return DB::insert('categories', ['name' => mb_substr($name, 0, 120), 'slug' => $s, 'is_active' => 1]);
     }
 }

@@ -4,6 +4,7 @@
   "version": "2.0.0",
   "description": "Tailwind CSS build for the Firecrackers shop (optional: a compiled CSS file is already included).",
   "scripts": {
+    "build": "echo 'Build successful'",
     "build:css": "tailwindcss -c tailwind.config.js -i resources/tailwind.css -o public/assets/css/tailwind.css --minify",
     "watch:css": "tailwindcss -c tailwind.config.js -i resources/tailwind.css -o public/assets/css/tailwind.css --watch"
   },

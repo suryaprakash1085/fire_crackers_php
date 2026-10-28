@@ -252,6 +252,44 @@ check('stock Add mode applies signed delta and warns on changed snapshot', (int)
 file_put_contents($tmp, "ID,SKU,Stock\n$xlsId,XLS-1,-2\n");
 $a->post('/admin/products/import', ['_csrf' => $AT, 'stock_mode' => 'add', 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]);
 check('stock Add mode applies negative adjustment', (int)DB::val("SELECT stock FROM products WHERE sku='XLS-1'") === 22);
+
+/* 1. stock delta with concurrent order */
+DB::exec("UPDATE products SET stock=17 WHERE id=$xlsId");
+file_put_contents($tmp, "ID,SKU,Stock,Stock at export\n$xlsId,XLS-1,30,22\n");
+$r = $a->post('/admin/products/import', ['_csrf' => $AT, 'stock_mode' => 'replace', 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]);
+check('stock delta with concurrent order', (int)DB::val("SELECT stock FROM products WHERE id=$xlsId") === 25 && str_contains($r['b'], 'Stock changed by orders after this file was downloaded'));
+
+/* 2. add-mode unedited upload */
+file_put_contents($tmp, "ID,SKU,Stock,Stock at export\n$xlsId,XLS-1,25,25\n");
+$a->post('/admin/products/import', ['_csrf' => $AT, 'stock_mode' => 'add', 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]);
+check('add-mode unedited upload', (int)DB::val("SELECT stock FROM products WHERE id=$xlsId") === 25);
+
+/* 3. inactive category product via voice */
+DB::exec("UPDATE categories SET is_active=0 WHERE id=2");
+$voiceInactive = \App\Services\VoiceParser::parse('add two sparklers');
+$cartInactive = \App\Services\CartService::add($SP, 1);
+check('inactive category product via voice', empty($voiceInactive['matches']) && !$cartInactive['ok'] && $cartInactive['status'] === 'unavailable');
+DB::exec("UPDATE categories SET is_active=1 WHERE id=2");
+
+/* 4. ID "12.0" */
+file_put_contents($tmp, "ID,SKU,Product Name\n{$xlsId}.0,XLS-1,Renamed Excel Item\n");
+$r = $a->post('/admin/products/import', ['_csrf' => $AT, 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]);
+check('ID "12.0"', DB::val("SELECT name FROM products WHERE id=$xlsId") === 'Renamed Excel Item');
+
+/* 5. numeric SKU */
+file_put_contents($tmp, "SKU,Product Name,Category,Original Price,Selling Price,Stock\n00789,Zero Leading Rocket,Flower Pots,150,120,10\n");
+$r = $a->post('/admin/products/import', ['_csrf' => $AT, 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]);
+check('numeric SKU', DB::val("SELECT sku FROM products WHERE sku='00789'") === '00789' && (int)DB::val("SELECT stock FROM products WHERE sku='00789'") === 10);
+
+/* dry-run preview and confirm flow */
+file_put_contents($tmp, "ID,SKU,Product Name,Stock\n$xlsId,XLS-1,Preview Item,40\n");
+$rPrev = $a->post('/admin/products/import', ['_csrf' => $AT, 'action' => 'preview', 'sheet' => new CURLFile($tmp, 'text/csv', 'p.csv')]);
+preg_match('/name="confirm_token" value="([a-f0-9]{32})"/', $rPrev['b'], $pm);
+$cToken = $pm[1] ?? '';
+check('dry-run preview does not save prematurely', $cToken !== '' && str_contains($rPrev['b'], 'Preview Import') && DB::val("SELECT name FROM products WHERE id=$xlsId") === 'Renamed Excel Item');
+$rConf = $a->post('/admin/products/import', ['_csrf' => $AT, 'action' => 'confirm', 'confirm_token' => $cToken, 'stock_mode' => 'replace']);
+check('preview confirm saves data', str_contains($rConf['b'], 'Products updated') && DB::val("SELECT name FROM products WHERE id=$xlsId") === 'Preview Item');
+
 @unlink($tmp);
 @unlink($xlsxTmp);
 /* ---------- FULL VOICE JOURNEY: ONE sentence -> checkout -> tracking -> admin -> cancel ---------- */
