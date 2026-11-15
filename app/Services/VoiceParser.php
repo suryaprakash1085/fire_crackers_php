@@ -25,7 +25,7 @@ final class VoiceParser {
         $n = count($tokens);
         if (!$n) return ['matches' => [], 'unmatched' => [], 'normalized' => $norm];
 
-        $products = DB::all('SELECT id,sku,name,name_ta,aliases FROM products WHERE status="active" ORDER BY id');
+        $products = DB::all('SELECT p.id,p.sku,p.name,p.name_ta,p.aliases FROM products p JOIN categories c ON c.id=p.category_id WHERE p.status="active" AND c.is_active=1 ORDER BY p.id');
         $cands = [];
         foreach ($products as $p) {
             $terms = [$p['name'], preg_replace('/\s*\(.*?\)\s*/u', ' ', $p['name'])];

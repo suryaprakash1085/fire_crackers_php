@@ -39,8 +39,8 @@ final class Xlsx {
         $zip->addFromString('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
         $zip->addFromString('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' . $wbSheets . '</sheets></workbook>');
         $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' . $wbRels . '</Relationships>');
-        // styles: 0 normal, 1 header (bold white on orange), 2 wrapped text, 3 bold
-        $zip->addFromString('xl/styles.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8590C"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>');
+        // styles: 0 normal, 1 header (bold white on orange), 2 wrapped text, 3 bold, 4 text format (@)
+        $zip->addFromString('xl/styles.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8590C"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>');
         $zip->close();
         $bin = (string)file_get_contents($tmp); @unlink($tmp);
         return $bin;
@@ -48,18 +48,32 @@ final class Xlsx {
 
     private static function sheetXml(array $sh): string {
         $rows = $sh['rows']; $header = $sh['header'] ?? true; $wrap = !empty($sh['wrap']);
+        $textCols = $sh['textCols'] ?? [];
         $x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
         if ($header) $x .= '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>';
-        if (!empty($sh['widths'])) { $x .= '<cols>'; foreach ($sh['widths'] as $i => $w) $x .= '<col min="' . ($i + 1) . '" max="' . ($i + 1) . '" width="' . (int)$w . '" customWidth="1"/>'; $x .= '</cols>'; }
+        if (!empty($sh['widths'])) {
+            $x .= '<cols>';
+            foreach ($sh['widths'] as $i => $w) {
+                $stAttr = in_array($i, $textCols, true) ? ' style="4"' : '';
+                $x .= '<col min="' . ($i + 1) . '" max="' . ($i + 1) . '" width="' . (int)$w . '" customWidth="1"' . $stAttr . '/>';
+            }
+            $x .= '</cols>';
+        }
         $x .= '<sheetData>';
         foreach ($rows as $r => $row) {
             $x .= '<row r="' . ($r + 1) . '"' . ($r === 0 && $header ? ' ht="30" customHeight="1"' : '') . '>';
             foreach (array_values($row) as $c => $v) {
                 if ($v === null || $v === '') continue;
                 $ref = self::colName($c) . ($r + 1);
-                $style = ($r === 0 && $header) ? 1 : ($wrap ? 2 : (($sh['boldFirstCol'] ?? false) && $c === 0 ? 3 : 0));
-                if (is_int($v) || is_float($v)) $x .= '<c r="' . $ref . '" s="' . $style . '"><v>' . $v . '</v></c>';
-                else $x .= '<c r="' . $ref . '" s="' . $style . '" t="inlineStr"><is><t xml:space="preserve">' . self::x((string)$v) . '</t></is></c>';
+                $isTextCol = in_array($c, $textCols, true);
+                $style = ($r === 0 && $header) ? 1 : ($isTextCol ? 4 : ($wrap ? 2 : (($sh['boldFirstCol'] ?? false) && $c === 0 ? 3 : 0)));
+                if ($isTextCol && $r > 0) {
+                    $x .= '<c r="' . $ref . '" s="' . $style . '" t="inlineStr"><is><t xml:space="preserve">' . self::x((string)$v) . '</t></is></c>';
+                } elseif (is_int($v) || is_float($v)) {
+                    $x .= '<c r="' . $ref . '" s="' . $style . '"><v>' . $v . '</v></c>';
+                } else {
+                    $x .= '<c r="' . $ref . '" s="' . $style . '" t="inlineStr"><is><t xml:space="preserve">' . self::x((string)$v) . '</t></is></c>';
+                }
             }
             $x .= '</row>';
         }

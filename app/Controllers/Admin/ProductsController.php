@@ -2,7 +2,7 @@
 namespace App\Controllers\Admin;
 
 use App\Core\DB;
-use App\Services\{MediaService, ProductSheet, ProductUploadStash, Xlsx};
+use App\Services\{MediaService, ProductImportStash, ProductSheet, ProductUploadStash, Xlsx};
 
 final class ProductsController extends AdminController {
     protected string $minRole = 'admin';
@@ -29,21 +29,102 @@ final class ProductsController extends AdminController {
         header('Content-Length: ' . strlen($bin)); header('Cache-Control: no-store');
         echo $bin; exit;
     }
-    public function importForm(): void { $this->render('admin/products/import', ['title' => 'Excel import / export', 'result' => null, 'error' => null, 'zip' => Xlsx::available(), 'stockMode' => 'replace']); }
+    public function importForm(): void {
+        $this->render('admin/products/import', [
+            'title' => 'Excel import / export',
+            'result' => null,
+            'preview' => null,
+            'confirmToken' => null,
+            'error' => null,
+            'zip' => Xlsx::available(),
+            'stockMode' => 'replace',
+            'createCategories' => false,
+        ]);
+    }
     public function importSubmit(): void {
         $this->post();
-        $f = $_FILES['sheet'] ?? null; $result = null; $error = null;
+        $action = (string)($_POST['action'] ?? '');
         $stockModeValue = $_POST['stock_mode'] ?? 'replace';
-        $stockMode = is_string($stockModeValue) ? $stockModeValue : 'replace';
-        if (!$f || ($f['error'] ?? 4) !== UPLOAD_ERR_OK) $error = ($f['error'] ?? 4) === UPLOAD_ERR_NO_FILE || !$f ? 'Choose the Excel file first.' : 'Upload failed (file too large for the server?).';
-        elseif ($f['size'] > 8 * 1024 * 1024) $error = 'File is too large (max 8 MB).';
-        elseif (!is_uploaded_file($f['tmp_name'])) $error = 'Invalid upload.';
-        else {
-            try { @set_time_limit(120); $result = ProductSheet::import($f['tmp_name'], (string)$f['name'], !empty($_POST['create_categories']), $stockMode); }
-            catch (\RuntimeException $e) { $error = $e->getMessage(); }
-            if ($result) log_error(sprintf('product import by %s: +%d ~%d =%d !%d', $this->admin['email'] ?? '?', $result['added'], $result['updated'], $result['unchanged'], count($result['errors'])));
+        $stockMode = is_string($stockModeValue) && in_array($stockModeValue, ['replace', 'add'], true) ? $stockModeValue : 'replace';
+        $createCategories = !empty($_POST['create_categories']);
+        $result = null;
+        $preview = null;
+        $confirmToken = null;
+        $error = null;
+
+        if ($action === 'confirm') {
+            $confirmToken = (string)($_POST['confirm_token'] ?? '');
+            $entry = ProductImportStash::get($confirmToken);
+            if (!$entry) {
+                $error = 'Preview session expired or not found. Please upload the file again.';
+            } else {
+                try {
+                    @set_time_limit(120);
+                    $result = ProductSheet::import($entry['file'], $entry['name'], $createCategories, $stockMode);
+                    ProductImportStash::clear($confirmToken);
+                    $confirmToken = null;
+                } catch (\RuntimeException $e) {
+                    $error = $e->getMessage();
+                }
+                if ($result) {
+                    log_error(sprintf('product import confirmed by %s: +%d ~%d =%d !%d', $this->admin['email'] ?? '?', $result['added'], $result['updated'], $result['unchanged'], count($result['errors'])));
+                }
+            }
+        } elseif ($action === 'cancel_preview') {
+            $confirmToken = (string)($_POST['confirm_token'] ?? '');
+            ProductImportStash::clear($confirmToken);
+            flash('info', 'Import preview cancelled.');
+            redirect('/admin/products/import');
+            return;
+        } else {
+            $f = $_FILES['sheet'] ?? null;
+            if (!$f || ($f['error'] ?? 4) !== UPLOAD_ERR_OK) {
+                $error = ($f['error'] ?? 4) === UPLOAD_ERR_NO_FILE || !$f ? 'Choose the Excel file first.' : 'Upload failed (file too large for the server?).';
+            } elseif ($f['size'] > 8 * 1024 * 1024) {
+                $error = 'File is too large (max 8 MB).';
+            } elseif (!is_uploaded_file($f['tmp_name'])) {
+                $error = 'Invalid upload.';
+            } else {
+                if ($action === 'preview') {
+                    $staged = ProductImportStash::stage($f['tmp_name'], (string)$f['name'], compact('stockMode', 'createCategories'));
+                    if ($staged['error'] || !$staged['token']) {
+                        $error = $staged['error'] ?? 'Could not stage file for preview.';
+                    } else {
+                        $confirmToken = $staged['token'];
+                        $stashed = ProductImportStash::get($confirmToken);
+                        try {
+                            @set_time_limit(120);
+                            $preview = ProductSheet::preview($stashed['file'], (string)$f['name'], $createCategories, $stockMode);
+                        } catch (\RuntimeException $e) {
+                            $error = $e->getMessage();
+                            ProductImportStash::clear($confirmToken);
+                            $confirmToken = null;
+                        }
+                    }
+                } else {
+                    // Direct import
+                    try {
+                        @set_time_limit(120);
+                        $result = ProductSheet::import($f['tmp_name'], (string)$f['name'], $createCategories, $stockMode);
+                    } catch (\RuntimeException $e) {
+                        $error = $e->getMessage();
+                    }
+                    if ($result) {
+                        log_error(sprintf('product import by %s: +%d ~%d =%d !%d', $this->admin['email'] ?? '?', $result['added'], $result['updated'], $result['unchanged'], count($result['errors'])));
+                    }
+                }
+            }
         }
-        $this->render('admin/products/import', ['title' => 'Excel import / export', 'result' => $result, 'error' => $error, 'zip' => Xlsx::available(), 'stockMode' => $stockMode]);
+        $this->render('admin/products/import', [
+            'title' => 'Excel import / export',
+            'result' => $result,
+            'preview' => $preview,
+            'confirmToken' => $confirmToken,
+            'error' => $error,
+            'zip' => Xlsx::available(),
+            'stockMode' => $stockMode,
+            'createCategories' => $createCategories,
+        ]);
     }
     public function show(string $id): void {
         $p = DB::one('SELECT p.*, c.name category_name FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=?', [(int)$id]);
