@@ -46,7 +46,10 @@ final class MediaService {
         return ['ok' => true, 'message' => 'Uploaded.', 'media' => ['id' => $id, 'path' => $path, 'filename' => $label]];
     }
 
-    private const VIDEO_MIME = ['video/mp4' => 'mp4', 'video/webm' => 'webm'];
+    private const VIDEO_MIME = [
+        'video/mp4' => 'mp4', 'video/x-m4v' => 'mp4', 'video/quicktime' => 'mp4',
+        'video/3gpp' => 'mp4', 'video/3gpp2' => 'mp4', 'video/webm' => 'webm',
+    ];
     private const VIDEO_MAX = 50 * 1024 * 1024;
 
     /** Handles a product video upload (MP4/WebM, max 50 MB). Returns ['ok'=>bool,'message'=>string,'path'=>?string] */
@@ -62,7 +65,12 @@ final class MediaService {
     public static function fromVideoBytes(string $bytes, string $origName): array {
         if ($bytes === '' || strlen($bytes) > self::VIDEO_MAX) return ['ok' => false, 'message' => 'Video must be under 50 MB.'];
         $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
-        if (!isset(self::VIDEO_MIME[$mime])) return ['ok' => false, 'message' => 'Only MP4 or WebM videos are allowed.'];
+        if (!isset(self::VIDEO_MIME[$mime])) {
+            // finfo can return application/octet-stream on some XAMPP builds: check the real file header instead.
+            if (substr($bytes, 4, 4) === 'ftyp') $mime = 'video/mp4';                      // MP4 / MOV / M4V / 3GP family
+            elseif (substr($bytes, 0, 4) === "\x1A\x45\xDF\xA3") $mime = 'video/webm';       // WebM / Matroska
+            else return ['ok' => false, 'message' => 'Only MP4 or WebM videos are allowed.'];
+        }
         $dir = 'uploads/videos/' . date('Y/m');
         if (!is_dir(PUBLIC_PATH . '/' . $dir) && !@mkdir(PUBLIC_PATH . '/' . $dir, 0775, true)) return ['ok' => false, 'message' => 'Upload folder is not writable.'];
         $path = $dir . '/' . bin2hex(random_bytes(12)) . '.' . self::VIDEO_MIME[$mime];

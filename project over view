@@ -1,0 +1,27 @@
+project run cmd 
+உங்க project-ல் console.bat இருக்கு. அது D:\xampp\php\php.exe-ஐ தானா கண்டுபிடிக்கும்.
+
+bat
+cd /d E:\crakersshopsuirya
+console.bat doctor
+console.bat migrate
+console.bat seed
+console.bat serve
+
+console.bat seed --demo   --nn product  and seeting,se4vice banner,catogies  add cmd
+
+
+option 2 
+வழி 2: Full path கொடுத்து run
+bat
+cd /d E:\crakersshopsuirya
+D:\xampp\php\php.exe bin/console doctor
+D:\xampp\php\php.exe bin/console migrate
+D:\xampp\php\php.exe bin/console serve
+
+
+ii Admin create
+
+console.bat admin:create "Suriya" suriya@gmail.com superadmin --password=Suriya@12345  -->  admin login email and  password set
+
+

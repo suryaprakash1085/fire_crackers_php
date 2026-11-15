@@ -118,8 +118,8 @@ h1,h2,h3,.font-display{font-family:'Poppins','Noto Sans Tamil',sans-serif;letter
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}.sparkle,.fw-hero,#fw-global,#fw-ambient{display:none}}
 
 /* ---------- toast / spinner ---------- */
-.toast-wrap{position:fixed;right:1rem;bottom:5.5rem;z-index:120;display:flex;flex-direction:column;gap:.5rem;max-width:min(92vw,360px)}
-@media(min-width:1024px){.toast-wrap{bottom:1.5rem}}
+.toast-wrap{position:fixed;right:1rem;bottom:9rem;z-index:120;display:flex;flex-direction:column;gap:.5rem;max-width:min(92vw,360px)}
+@media(min-width:1024px){.toast-wrap{bottom:6rem}}
 .toast{background:#fff;border:1px solid rgb(0 0 0/.07);border-left:4px solid var(--c-primary);padding:.75rem 1rem;border-radius:.85rem;box-shadow:0 12px 32px rgb(0 0 0/.16);font-size:.9rem;animation:tin .25s ease-out}
 .toast.error{border-left-color:#d92d20}.toast.success{border-left-color:#12b76a}
 @keyframes tin{from{opacity:0;transform:translateY(10px)}}
@@ -223,3 +223,57 @@ main{overflow-wrap:break-word}
 .btn.btn-wrap{white-space:normal}
 img,svg,video,canvas{max-width:100%}
 .table-x,.qo-table{overflow-wrap:normal}
+
+/* ============ NAVBAR (responsive, no wrapping) ============ */
+.nb-bar{width:100%;margin:0 auto;height:4rem;display:flex;align-items:center;gap:.75rem;padding:0 1rem}
+@media(min-width:640px){.nb-bar{padding:0 1.5rem}}
+@media(min-width:1180px){.nb-bar{padding:0 1.5rem;gap:1rem}}
+@media(min-width:1280px){.nb-bar{padding:0 2.5rem}}
+@media(min-width:1536px){.nb-bar{padding:0 4rem}}
+.nb-brand{display:flex;align-items:center;gap:.65rem;min-width:0;flex:0 1 auto;text-decoration:none;color:inherit}
+.nb-logo{height:2.5rem;width:auto;max-width:3.5rem;object-fit:contain;flex-shrink:0}
+.nb-logo-fallback{width:2.5rem;height:2.5rem;border-radius:.75rem;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
+.nb-brand-text{font-weight:700;font-size:1rem;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+@media(min-width:640px){.nb-brand-text{font-size:1.1rem}}
+.nb-links{display:none}
+@media(min-width:1180px){
+  .nb-links{display:flex;align-items:center;justify-content:center;flex:1 1 auto;min-width:0;gap:.125rem}
+}
+.nb-link{display:inline-flex;align-items:center;gap:.4rem;flex-shrink:0;white-space:nowrap;padding:.5rem .6rem;border-radius:.6rem;font-size:.8125rem;line-height:1.25;font-weight:600;color:rgb(var(--c-text-rgb)/.8);transition:background .15s,color .15s;text-decoration:none}
+.nb-link:hover{background:rgb(var(--c-primary-rgb)/.1)}
+.nb-link.is-active{color:var(--c-primary);background:rgb(var(--c-primary-rgb)/.1)}
+.nb-link:focus-visible,.nb-iconbtn:focus-visible,.nb-mlink:focus-visible{outline:2px solid var(--c-primary);outline-offset:2px}
+.nb-ic{display:none;align-items:center}
+@media(min-width:1280px){.nb-link{font-size:.875rem;padding:.5rem .7rem}}
+@media(min-width:1536px){.nb-link{padding:.5rem .8rem}}
+@media(min-width:1700px){.nb-ic{display:inline-flex}}
+.nb-actions{display:flex;align-items:center;gap:.25rem;flex-shrink:0;margin-left:auto}
+@media(min-width:1180px){.nb-actions{margin-left:0}}
+.nb-iconbtn{display:inline-flex;align-items:center;justify-content:center;width:2.75rem;height:2.75rem;border-radius:.6rem;color:inherit;background:none;border:0;cursor:pointer}
+.nb-iconbtn:hover{background:rgb(var(--c-primary-rgb)/.1)}
+.nb-search{display:none;position:relative;align-items:center}
+.nb-search-ic{position:absolute;left:.85rem;color:rgb(var(--c-text-rgb)/.4);pointer-events:none;display:flex}
+.nb-search-input{width:13rem;height:2.4rem;padding:0 .9rem 0 2.4rem;border-radius:999px;border:1px solid rgb(var(--c-text-rgb)/.16);background:#fff;font-size:.875rem;color:var(--c-text);transition:border-color .15s,box-shadow .15s}
+.nb-search-input:focus{border-color:var(--c-primary);box-shadow:0 0 0 4px rgb(var(--c-primary-rgb)/.13);outline:none}
+@media(min-width:1536px){.nb-search{display:flex}.nb-search-link{display:none}}
+@media(min-width:1180px){.nb-burger{display:none}}
+/* mobile / tablet menu panel */
+.nb-mobile{background:#fff;border-top:1px solid rgb(0 0 0/.05);max-height:calc(100vh - 8.5rem);max-height:calc(100dvh - 8.5rem);overflow-y:auto;-webkit-overflow-scrolling:touch}
+.nb-mobile.hidden{display:none}
+@media(min-width:1180px){.nb-mobile,.nb-mobile.hidden{display:none!important}}
+.nb-mobile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.4rem;padding:.75rem 1rem}
+@media(min-width:640px){.nb-mobile-grid{padding:.75rem 1.5rem;grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:340px){.nb-mobile-grid{grid-template-columns:minmax(0,1fr)}}
+.nb-mlink{display:flex;align-items:center;gap:.5rem;min-width:0;padding:.75rem;border-radius:.75rem;font-size:.875rem;font-weight:600;background:rgb(0 0 0/.03);color:inherit;text-decoration:none}
+.nb-mlink:hover{background:rgb(0 0 0/.06)}
+.nb-mlink.is-active{background:rgb(var(--c-primary-rgb)/.1);color:var(--c-primary)}
+.nb-mlink svg,.nb-link svg{flex-shrink:0}
+.nb-mlink span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* WhatsApp floating button: bottom-RIGHT; toasts are lifted above it so they never stack */
+.wa-float{position:fixed;right:1rem;bottom:calc(4.75rem + env(safe-area-inset-bottom));z-index:65;width:3.25rem;height:3.25rem;border-radius:999px;background:#25D366;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 22px rgb(37 211 102/.45);transition:transform .2s,bottom .3s}
+.wa-float:hover{transform:scale(1.08)}
+.wa-float svg{width:1.75rem;height:1.75rem}
+@media(min-width:1024px){.wa-float{right:1.25rem;bottom:1.25rem;width:3.5rem;height:3.5rem}}
+/* when the Quick Order bar slides up, lift the button above it instead of overlapping */
+@media(max-width:1023px){body:has(.qo-bar.show) .wa-float{bottom:calc(8.6rem + env(safe-area-inset-bottom))}}

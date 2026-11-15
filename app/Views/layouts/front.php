@@ -31,32 +31,31 @@ $bottom = [['/', 'Home', 'home'], ['/products', 'Products', 'package'], ['/quick
 <?php if (setting('promo_text')): ?>
 <div class="text-center text-xs sm:text-sm py-2 px-3 font-medium text-white" style="background:linear-gradient(90deg,var(--c-primary),var(--c-secondary))"><span class="inline-flex items-center gap-2"><?= icon('flame', 'w-4 h-4 shrink-0') ?><span><?= e(setting('promo_text')) ?></span></span></div>
 <?php endif; ?>
-<header class="sticky top-0 z-50 border-b border-black/5 glass">
-  <div class="w-full mx-auto px-4 sm:px-6 lg:px-10 2xl:px-16 h-16 flex items-center justify-between gap-3">
-    <a href="<?= e(url('/')) ?>" class="flex items-center gap-2.5 min-w-0" aria-label="<?= e($brand) ?> home">
-      <?php if ($logo): ?><img src="<?= e(upload_url($logo)) ?>" alt="" class="h-10 w-auto max-w-[56px] object-contain"><?php else: ?><span class="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0 shadow-soft" style="background:linear-gradient(135deg,var(--c-primary),var(--c-accent))"><?= icon('sparkles', 'w-5 h-5') ?></span><?php endif; ?>
-      <span class="font-display font-bold text-base sm:text-lg leading-tight truncate"><?= e($brand) ?></span>
+<header class="site-header sticky top-0 z-50 border-b border-black/5 glass">
+  <div class="nb-bar">
+    <a href="<?= e(url('/')) ?>" class="nb-brand" aria-label="<?= e($brand) ?> home">
+      <?php if ($logo): ?><img src="<?= e(upload_url($logo)) ?>" alt="" class="nb-logo"><?php else: ?><span class="nb-logo-fallback shadow-soft" style="background:linear-gradient(135deg,var(--c-primary),var(--c-accent))"><?= icon('sparkles', 'w-5 h-5') ?></span><?php endif; ?>
+      <span class="nb-brand-text font-display"><?= e($brand) ?></span>
     </a>
-    <nav class="hidden lg:flex items-center gap-0.5" aria-label="Main">
-      <?php foreach ($nav as [$h, $l, $ic]): ?>
-        <a href="<?= e(url($h)) ?>" class="px-2.5 xl:px-3 py-2 rounded-lg text-[13px] xl:text-sm font-semibold flex items-center gap-1.5 transition hover:bg-primary/10 <?= $isActive($h) ? 'text-primary bg-primary/10' : 'text-ink/80' ?>" <?= $isActive($h) ? 'aria-current="page"' : '' ?> <?= $h === '/cart' && $drawer ? 'data-cart-open' : '' ?>>
-          <span class="hidden xl:inline-flex"><?= icon($ic, 'w-4 h-4') ?></span><?= e($l) ?><?php if ($h === '/cart'): ?><span data-cart-badge class="hidden ml-0.5 min-w-[1.35rem] h-[1.35rem] px-1 rounded-full text-[11px] text-white flex items-center justify-center" style="background:var(--c-primary)">0</span><?php endif; ?>
+    <nav class="nb-links" aria-label="Main">
+      <?php foreach ($nav as [$h, $l, $ic]): $on = $isActive($h); ?>
+        <a href="<?= e(url($h)) ?>" class="nb-link<?= $on ? ' is-active' : '' ?>" <?= $on ? 'aria-current="page"' : '' ?> <?= $h === '/cart' && $drawer ? 'data-cart-open' : '' ?>>
+          <span class="nb-ic"><?= icon($ic, 'w-4 h-4') ?></span><span class="nb-label"><?= e($l) ?></span><?php if ($h === '/cart'): ?><span data-cart-badge class="hidden ml-0.5 min-w-[1.35rem] h-[1.35rem] px-1 rounded-full text-[11px] text-white flex items-center justify-center" style="background:var(--c-primary)">0</span><?php endif; ?>
         </a>
       <?php endforeach; ?>
     </nav>
-    <div class="flex items-center gap-1">
-      <form action="<?= e(url('/products')) ?>" method="get" class="hidden xl:flex items-center relative" role="search"><input name="q" type="search" placeholder="Search crackers…" aria-label="Search products" class="input !min-h-[38px] !py-1.5 !pl-9 !w-52 !rounded-full text-sm"><span class="absolute left-3 text-ink/40 pointer-events-none"><?= icon('search', 'w-4 h-4') ?></span></form>
-      <a href="<?= e(url('/products?focus=search')) ?>" class="xl:hidden p-2.5 rounded-lg hover:bg-primary/10" aria-label="Search"><?= icon('search', 'w-5 h-5') ?></a>
-      <button type="button" data-nav-toggle aria-expanded="false" aria-controls="mobile-nav" class="lg:hidden p-2.5 rounded-lg hover:bg-primary/10" aria-label="Menu"><?= icon('menu', 'w-6 h-6') ?></button>
+    <div class="nb-actions">
+      <form action="<?= e(url('/products')) ?>" method="get" class="nb-search" role="search"><span class="nb-search-ic"><?= icon('search', 'w-4 h-4') ?></span><input name="q" type="search" placeholder="Search crackers…" aria-label="Search products" class="nb-search-input"></form>
+      <a href="<?= e(url('/products?focus=search')) ?>" class="nb-iconbtn nb-search-link" aria-label="Search"><?= icon('search', 'w-5 h-5') ?></a>
+      <button type="button" data-nav-toggle aria-expanded="false" aria-controls="mobile-nav" class="nb-iconbtn nb-burger" aria-label="Menu"><?= icon('menu', 'w-6 h-6') ?></button>
     </div>
   </div>
-  <nav id="mobile-nav" class="hidden lg:hidden border-t border-black/5 bg-white" aria-label="Mobile">
-    <div class="w-full mx-auto px-4 sm:px-6 lg:px-10 2xl:px-16 py-3 grid grid-cols-2 gap-1.5">
+  <nav id="mobile-nav" class="nb-mobile hidden" aria-label="Mobile">
+    <div class="nb-mobile-grid">
       <?php foreach ($nav as [$h, $l, $ic]): ?>
-        <a href="<?= e(url($h)) ?>" class="flex items-center gap-2 px-3 py-3 rounded-xl text-sm font-semibold <?= $isActive($h) ? 'bg-primary/10 text-primary' : 'bg-black/[.03] hover:bg-black/5' ?>"><?= icon($ic, 'w-4 h-4') ?><?= e($l) ?></a>
+        <a href="<?= e(url($h)) ?>" class="nb-mlink<?= $isActive($h) ? ' is-active' : '' ?>"><?= icon($ic, 'w-4 h-4') ?><span><?= e($l) ?></span></a>
       <?php endforeach; ?>
-      <a href="<?= e(url('/track')) ?>" class="flex items-center gap-2 px-3 py-3 rounded-xl text-sm font-semibold bg-black/[.03] hover:bg-black/5"><?= icon('truck', 'w-4 h-4') ?>Track Order</a>
-      
+      <a href="<?= e(url('/track')) ?>" class="nb-mlink"><?= icon('truck', 'w-4 h-4') ?><span>Track Order</span></a>
     </div>
   </nav>
 </header>
@@ -94,6 +93,7 @@ $bottom = [['/', 'Home', 'home'], ['/products', 'Products', 'package'], ['/quick
   <div class="p-4 border-t border-black/5 grid grid-cols-2 gap-2 shrink-0"><a href="<?= e(url('/cart')) ?>" class="btn btn-outline">View full cart</a><a href="<?= e(url('/quick-order')) ?>" class="btn btn-soft"><?= icon('zap', 'w-4 h-4') ?> Quick Order</a></div>
 </aside>
 <?php endif; ?>
-<?php if (setting('whatsapp_number')): ?><a href="https://wa.me/<?= e(setting('whatsapp_number')) ?>" target="_blank" rel="noopener" class="fixed bottom-20 lg:bottom-5 right-4 z-40 w-14 h-14 rounded-full bg-[#25D366] text-white flex items-center justify-center shadow-lift hover:scale-105 transition" aria-label="Chat on WhatsApp"><?= icon('message-circle', 'w-7 h-7') ?></a><?php endif; ?>
+<?php $waNum = preg_replace('/\D+/', '', (string)(setting('whatsapp_number') ?: setting('contact_phone'))); if (strlen($waNum) === 10) $waNum = '91' . $waNum; ?>
+<a href="<?= $waNum !== '' ? 'https://wa.me/' . e($waNum) : e(url('/contact')) ?>" <?= $waNum !== '' ? 'target="_blank" rel="noopener"' : '' ?> class="wa-float" data-wa-float aria-label="Chat on WhatsApp"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.52 3.48A11.86 11.86 0 0 0 12.04 0C5.5 0 .19 5.31.19 11.85c0 2.09.55 4.13 1.59 5.93L0 24l6.4-1.68a11.84 11.84 0 0 0 5.64 1.44h.01c6.54 0 11.85-5.31 11.85-11.85 0-3.17-1.23-6.15-3.38-8.43zM12.05 21.75h-.01a9.9 9.9 0 0 1-5.04-1.38l-.36-.21-3.8 1 1.01-3.7-.24-.38a9.87 9.87 0 0 1-1.51-5.23c0-5.45 4.44-9.89 9.9-9.89 2.64 0 5.12 1.03 6.99 2.9a9.82 9.82 0 0 1 2.9 7c0 5.46-4.44 9.89-9.84 9.89zm5.42-7.4c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.14-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.08 1.76-.72 2.01-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35z"/></svg></a>
 <?php foreach (($GLOBALS["pageScripts"] ?? []) as $s): ?><script src="<?= e(asset($s)) ?>" defer></script><?php endforeach; ?>
 </body></html>
