@@ -1,0 +1,1 @@
+No SQL is needed. The orders table has no ack_* columns, and image/thumbnail changes use existing tables.

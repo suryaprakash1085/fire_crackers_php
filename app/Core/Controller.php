@@ -6,6 +6,7 @@ abstract class Controller {
     protected function json(array $data, int $code = 200): never {
         http_response_code($code);
         header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, max-age=0');   // cart/stock answers must never come from a browser or proxy cache
         echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }

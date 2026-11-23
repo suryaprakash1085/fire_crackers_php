@@ -1,6 +1,6 @@
 <?php
 use App\Controllers\{HomeController, PageController, ProductController, ApiController, ShopController};
-use App\Controllers\Admin\{AuthController, DashboardController, ProductsController, CrudController, OrdersController, EnquiriesController, ContentController, SettingsController, AdminUsersController, ReportsController, CompanyController};
+use App\Controllers\Admin\{AuthController, DashboardController, ProductsController, CrudController, OrdersController, EnquiriesController, ContentController, SettingsController, AdminUsersController, ReportsController, CompanyController, PriceListController};
 
 $r = $router;
 $r->get('/', [HomeController::class, 'index']);
@@ -11,10 +11,12 @@ $r->get('/product-details.php', [ProductController::class, 'show']);
 $r->get('/product', [ProductController::class, 'show']);
 $r->get('/quick-order', [ShopController::class, 'quickOrder']);
 $r->get('/voice-order', [ShopController::class, 'voiceOrder']);
+$r->get('/price-list', [ShopController::class, 'priceList']);
 $r->get('/cart', [ShopController::class, 'cart']);
 $r->get('/checkout', [ShopController::class, 'checkout']);
 $r->post('/checkout', [ShopController::class, 'place']);
 $r->get('/order-success', [ShopController::class, 'success']);
+$r->get('/order-invoice', [ShopController::class, 'invoice']);
 $r->get('/track', [ShopController::class, 'track']);
 $r->post('/track', [ShopController::class, 'trackSubmit']);
 $r->get('/contact', [PageController::class, 'contact']);
@@ -25,6 +27,7 @@ $r->get('/api/cart', [ApiController::class, 'cart']);
 $r->post('/api/cart/add', [ApiController::class, 'add']);
 $r->post('/api/cart/add-many', [ApiController::class, 'addMany']);
 $r->post('/api/cart/update', [ApiController::class, 'update']);
+$r->post('/api/cart/set-many', [ApiController::class, 'setMany']);
 $r->post('/api/cart/remove', [ApiController::class, 'remove']);
 $r->post('/api/cart/clear', [ApiController::class, 'clear']);
 $r->get('/api/products/lookup', [ApiController::class, 'lookup']);
@@ -59,7 +62,15 @@ foreach (['categories', 'services', 'banners'] as $e) {
 
 $r->get('/admin/orders', [OrdersController::class, 'index']);
 $r->get('/admin/orders/export', [OrdersController::class, 'export']);
+$r->get('/admin/orders/export-excel', [OrdersController::class, 'exportExcel']);
+$r->get('/admin/orders/product-search', [OrdersController::class, 'productSearch']);
 $r->get('/admin/orders/{id}', [OrdersController::class, 'show']);
+$r->get('/admin/orders/{id}/modal', [OrdersController::class, 'modalView']);
+$r->get('/admin/orders/{id}/edit', [OrdersController::class, 'editForm']);
+$r->post('/admin/orders/{id}/edit', [OrdersController::class, 'editSave']);
+$r->get('/admin/orders/{id}/invoice', [OrdersController::class, 'invoicePreview']);
+$r->get('/admin/orders/{id}/pdf', [OrdersController::class, 'pdf']);
+$r->post('/admin/orders/{id}/cancel', [OrdersController::class, 'cancel']);
 $r->get('/admin/orders/{id}/print', [OrdersController::class, 'printView']);
 $r->post('/admin/orders/{id}/status', [OrdersController::class, 'status']);
 $r->post('/admin/orders/{id}/details', [OrdersController::class, 'details']);
@@ -68,6 +79,12 @@ $r->get('/admin/reports', [ReportsController::class, 'index']);
 $r->get('/admin/reports/export', [ReportsController::class, 'export']);
 $r->get('/admin/company', [CompanyController::class, 'index']);
 $r->post('/admin/company', [CompanyController::class, 'save']);
+$r->post('/admin/company/apply-discount', [CompanyController::class, 'applyDiscount']);
+
+$r->get('/admin/price-list', [PriceListController::class, 'index']);
+$r->post('/admin/price-list', [PriceListController::class, 'save']);
+$r->post('/admin/price-list/remove', [PriceListController::class, 'remove']);
+$r->get('/admin/price-list/preview', [PriceListController::class, 'preview']);
 
 $r->get('/admin/enquiries', [EnquiriesController::class, 'index']);
 $r->post('/admin/enquiries/{id}', [EnquiriesController::class, 'update']);

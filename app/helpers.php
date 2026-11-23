@@ -15,6 +15,10 @@ function base_path(): string {
 function url(string $path = ''): string { return base_path() . '/' . ltrim($path, '/'); }
 function asset(string $path): string { $f = PUBLIC_PATH . '/' . ltrim($path, '/'); return url($path) . (is_file($f) ? '?v=' . filemtime($f) : ''); }
 function upload_url(?string $path): string { return $path ? url($path) : ''; }
+/** "uploads/2026/11/abc.webp" -> "uploads/2026/11/abc_thumb.webp" (the thumbnail MediaService makes when GD is available). */
+function upload_thumb_path(?string $path): string { $path = (string)$path; $i = strrpos($path, '.'); return $path === '' || $i === false ? '' : substr($path, 0, $i) . '_thumb' . substr($path, $i); }
+/** URL of the thumbnail if it exists, otherwise of the original image (older uploads have no thumbnail). */
+function upload_thumb_url(?string $path): string { $t = upload_thumb_path($path); return ($t !== '' && is_file(PUBLIC_PATH . '/' . $t)) ? url($t) : upload_url($path); }
 function money($n): string { return '₹' . number_format((float)$n, 2); }
 function setting(string $key, $default = '') { return Setting::get($key, $default); }
 function now(): string { return date('Y-m-d H:i:s'); }
@@ -104,4 +108,43 @@ function art(string $name, string $cls = 'w-16 h-16'): string {
         'sky' => "<g stroke='$P' stroke-width='4' stroke-linecap='round' class='art-twinkle'><path d='M60 60V16M60 60l32-32M60 60l44 0M60 60L92 92M60 60V104M60 60L28 92M60 60H16M60 60L28 28'/></g><g fill='$A'><circle cx='60' cy='12' r='4'/><circle cx='95' cy='25' r='4'/><circle cx='108' cy='60' r='4'/><circle cx='95' cy='95' r='4'/><circle cx='60' cy='108' r='4'/><circle cx='25' cy='95' r='4'/><circle cx='12' cy='60' r='4'/><circle cx='25' cy='25' r='4'/></g><circle cx='60' cy='60' r='9' fill='$S'/>",
     ][$k];
     return '<svg class="' . e($cls) . '" viewBox="0 0 120 120" fill="none" aria-hidden="true">' . $svg . '</svg>';
+}
+
+/** Company-wide discount percentage (stored ONLY in Company Profile settings). */
+function company_discount(): float { $d = (float)setting('company_discount_percent', 0); return max(0.0, min(90.0, $d)); }
+/** Discount amount for an original price using the company discount. */
+function discount_amount($original): float { return round((float)$original * company_discount() / 100, 2); }
+/** Final price after the company discount. Original price is never modified. */
+function discounted_price($original): float { return round((float)$original - discount_amount($original), 2); }
+/** SQL expression computing the discounted price from a column, so every query uses the latest company discount. */
+function discount_sql(string $col = 'p.original_price'): string { $d = number_format(company_discount(), 2, '.', ''); return "ROUND($col - ROUND($col * $d / 100, 2), 2)"; }
+
+/** GPay / UPI ID format (e.g. name@okhdfcbank). Used by Company settings and before an invoice QR is drawn. */
+function valid_upi_id(string $v): bool { return (bool)preg_match('/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/D', $v); }
+
+/** Relative path of the company logo: the one uploaded on Company Profile, else the older "Logo" from App Customization, else ''. */
+function company_logo_path(): string {
+    $p = (string)setting('company_logo_path', '');
+    if ($p !== '' && str_starts_with($p, 'uploads/') && is_file(PUBLIC_PATH . '/' . $p)) return $p;
+    return (string)setting('logo', '');
+}
+/** Public URL of the company logo, or '' when there is none (callers then keep the default icon). */
+function company_logo_url(): string { $p = company_logo_path(); return $p !== '' ? upload_url($p) : ''; }
+
+/** Parses a quantity that must be a whole number >= 1. Returns null for 0, negatives, decimals, blanks and text. */
+function parse_qty($v): ?int {
+    if (is_int($v)) return $v >= 1 ? $v : null;
+    if (!is_string($v)) return null;
+    $v = trim($v);
+    return preg_match('/^[0-9]{1,9}$/', $v) && (int)$v >= 1 ? (int)$v : null;
+}
+
+/** Runs $fn after the HTTP response has been sent (so slow work such as SMTP never delays or breaks the page). Failures are logged only. */
+function after_response(callable $fn): void {
+    register_shutdown_function(function () use ($fn) {
+        ignore_user_abort(true);
+        if (function_exists('fastcgi_finish_request')) @fastcgi_finish_request();
+        else { while (ob_get_level() > 0) @ob_end_flush(); @flush(); }
+        try { $fn(); } catch (\Throwable $e) { log_error('after_response: ' . $e->getMessage()); }
+    });
 }

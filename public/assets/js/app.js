@@ -18,10 +18,20 @@
   FC.api = async (path, data = null) => {
     const opt = { headers: { 'X-CSRF-Token': csrf(), Accept: 'application/json' }, credentials: 'same-origin' };
     if (data) { opt.method = 'POST'; const body = new URLSearchParams(data); if (!body.has('_csrf')) body.set('_csrf', csrf()); opt.body = body; }
-    let r, j;
+    const mine = ++FC._issued; let r, j;
     try { r = await fetch(FC.url(path), opt); j = await r.json(); } catch (e) { return { ok: false, message: 'Network error. Please try again.' }; }
-    if (j.cart) FC.setCart(j.cart);
+    if (j.cart && mine > FC._applied) { FC._applied = mine; FC.setCart(j.cart); }   // ignore a cart snapshot that is older than one already shown
     return j;
+  };
+  FC._issued = 0; FC._applied = 0;
+
+  /* Quantity inputs: always a whole number from 1 to the available maximum. Writes the clean value back so the box shows what will be sent. */
+  FC.qtyOf = (inp) => {
+    const max = Math.max(1, parseInt(inp.max, 10) || 1);
+    let n = Math.floor(Number(String(inp.value).trim()));
+    if (!Number.isFinite(n) || n < 1) n = 1;
+    if (n > max) n = max;
+    inp.value = n; return n;
   };
   FC.cart = null;
   FC.setCart = (c) => {
@@ -57,6 +67,13 @@
           </div>
         </li>`).join('');
       const issues = c.issues.map((m) => `<p class="text-xs text-amber-700 bg-amber-50 rounded-lg p-2 mt-2">${FC.esc(m)}</p>`).join('');
+      const minRem = c.meets_min ? 0 : Math.max(0, c.min_order - (c.subtotal - c.discount));
+      const minNote = c.meets_min ? '' : `<p class=\"text-xs text-red-700 bg-red-50 rounded-lg p-2 mt-2\" role=\"alert\">Minimum order is ${FC.money(c.min_order)}. Add ${FC.money(minRem)} more to check out.</p>`;
+      /* Quick Order page only (data-min-line): the same line as the floating bar, with a progress bar, instead of the red note */
+      const payable = Math.round((c.subtotal - c.discount + Number.EPSILON) * 100) / 100;
+      const minLine = !el.hasAttribute('data-min-line') || !(c.min_order > 0) ? '' : c.meets_min
+        ? '<div class="min-line ok in-panel" role="status">✓ Minimum order reached</div>'
+        : `<div class="min-line in-panel" role="status">Minimum order ${FC.money(c.min_order)} · Add ${FC.money(minRem)} more<span class="min-track"><span class="min-fill" style="width:${Math.max(0, Math.min(100, payable / c.min_order * 100)).toFixed(1)}%"></span></span></div>`;
       const free = c.free_delivery_remaining > 0 ? `<p class="text-xs text-green-700 bg-green-50 rounded-lg p-2 mt-2">Add ${FC.money(c.free_delivery_remaining)} more for free delivery.</p>` : '';
       el.innerHTML = `<ul>${rows}</ul>${issues}${free}
         <dl class="mt-4 space-y-1.5 text-sm">
@@ -65,25 +82,37 @@
           <div class="flex justify-between"><dt class="muted">Delivery</dt><dd>${c.delivery > 0 ? FC.money(c.delivery) : 'Free'}</dd></div>
           <div class="flex justify-between text-base font-bold pt-2 border-t border-black/10"><dt>Total</dt><dd>${FC.money(c.total)}</dd></div>
         </dl>
-        <p class="hint">Final prices and stock are re-verified at checkout.</p>
+        ${el.hasAttribute('data-min-line') ? minLine : minNote}<p class="hint">Final prices and stock are re-verified at checkout.</p>
         <div class="grid gap-2 mt-4 ${full ? 'sm:grid-cols-2' : ''}">
-          <a href="${FC.url('/checkout')}" class="btn btn-primary ${c.meets_min ? '' : 'pointer-events-none opacity-50'}"><i data-lucide="lock" class="w-4 h-4"></i> Proceed to Checkout</a>
+          <a href="${FC.url('/checkout')}" class="btn btn-primary ${c.meets_min ? '' : 'pointer-events-none opacity-50'}" ${c.meets_min ? '' : 'aria-disabled="true" tabindex="-1"'}><i data-lucide="lock" class="w-4 h-4"></i> Proceed to Checkout</a>
           <button type="button" data-clear class="btn btn-danger"><i data-lucide="x" class="w-4 h-4"></i> Clear cart</button>
         </div>`;
       FC.icons();
     };
     document.addEventListener('fc:cart', (e) => render(e.detail));
+    const resync = () => FC.cart && document.dispatchEvent(new CustomEvent('fc:cart', { detail: FC.cart }));   // redraw from the stored cart (undoes anything typed but not accepted)
+    const setQty = async (li, want) => {
+      const inp = li.querySelector('input'); const max = Math.max(1, parseInt(inp.max, 10) || 1);
+      if (want < 1) { FC.toast('Minimum quantity is 1. Use the bin icon to remove the item.', 'info'); resync(); return; }
+      if (want > max) FC.toast('Only ' + max + ' available.', 'info');
+      const j = await FC.api('/api/cart/update', { product_id: li.dataset.id, qty: Math.min(want, max) });
+      if (!j.ok) { FC.toast(j.message || 'Could not update the cart.', 'error'); resync(); }
+      else if (j.message && j.message !== 'Updated.' && want <= max) FC.toast(j.message, 'info');
+    };
     el.addEventListener('click', async (e) => {
       const li = e.target.closest('li[data-id]');
-      if (e.target.closest('[data-q]') && li) { const inp = li.querySelector('input'); const v = Math.max(0, +inp.value + +e.target.closest('[data-q]').dataset.q); await FC.api('/api/cart/update', { product_id: li.dataset.id, qty: v }); }
+      const q = e.target.closest('[data-q]');
+      if (q && li) { const inp = li.querySelector('input'); await setQty(li, FC.qtyOf(inp) + +q.dataset.q); }
       else if (e.target.closest('[data-remove]') && li) await FC.api('/api/cart/remove', { product_id: li.dataset.id });
       else if (e.target.closest('[data-clear]') && confirm('Remove all items from your cart?')) await FC.api('/api/cart/clear', { x: 1 });
     });
     el.addEventListener('change', async (e) => {
       const li = e.target.closest('li[data-id]'); if (!li || e.target.type !== 'number') return;
-      const j = await FC.api('/api/cart/update', { product_id: li.dataset.id, qty: Math.max(0, parseInt(e.target.value || '0', 10)) });
-      if (j.message && j.message !== 'Updated.') FC.toast(j.message, 'info');
+      const raw = Math.floor(Number(String(e.target.value).trim()));
+      if (!Number.isFinite(raw) || raw < 1) { FC.toast('Quantity must be 1 or more.', 'info'); resync(); return; }
+      await setQty(li, raw);
     });
+    el.addEventListener('keydown', (e) => { if (e.target.type === 'number' && ['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault(); });
     FC.api('/api/cart').then((j) => j.cart && null);
   };
 
@@ -99,18 +128,33 @@
   /* ---------- product card interactions ---------- */
   document.addEventListener('click', async (e) => {
     const q = e.target.closest('.qty [data-step]');
-    if (q) { const i = q.parentElement.querySelector('input'); i.value = Math.max(1, Math.min(+i.max || 999, (+i.value || 1) + +q.dataset.step)); return; }
+    if (q) { const i = q.parentElement.querySelector('input'); const max = Math.max(1, parseInt(i.max, 10) || 1); i.value = Math.max(1, Math.min(max, FC.qtyOf(i) + +q.dataset.step)); return; }
     const add = e.target.closest('[data-add]');
     if (add) {
-      const card = add.closest('[data-card]'); const inp = add.hasAttribute('data-quick') ? null : (card && card.querySelector('.qty input'));
-      add.disabled = true; const old = add.innerHTML;
-      const r = await FC.add(+add.dataset.add, inp ? Math.max(1, +inp.value || 1) : 1, add.dataset.source || 'cart');
-      add.disabled = false; add.innerHTML = old; FC.icons();
+      if (add.disabled || add.dataset.busy) return;
+      // the quantity sent is read from THIS card's box at the moment of the click, cleaned (whole number, 1..stock) and written back
+      const card = add.closest('[data-card]'); const inp = card && card.querySelector('.qty input');
+      const qty = inp ? FC.qtyOf(inp) : 1;
+      add.dataset.busy = 1; add.disabled = true; const old = add.innerHTML;
+      const r = await FC.add(+add.dataset.add, qty, add.dataset.source || 'cart');
+      delete add.dataset.busy; add.disabled = false; add.innerHTML = old; FC.icons();
+      if (r && r.ok && inp) inp.value = 1;   // added: the box goes back to 1 so it never looks like the quantity is still pending
       if (r && r.ok && window.FW) FW.burstAt(add);   // 🎆 fire blast where you clicked
       if (r && r.ok) setTimeout(() => FC.openDrawer && FC.openDrawer(), 450);
     }
     const nav = e.target.closest('[data-nav-toggle]');
     if (nav) { const m = document.getElementById('mobile-nav'); const open = m.classList.toggle('hidden') === false; nav.setAttribute('aria-expanded', open); }
+  });
+
+  document.addEventListener('keydown', (e) => { if (e.target.matches && e.target.matches('.qty input[data-qty]') && ['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault(); });
+  document.addEventListener('input', (e) => { const i = e.target; if (i.matches && i.matches('.qty input[data-qty]') && /\D/.test(i.value)) i.value = i.value.replace(/\D/g, ''); });
+  document.addEventListener('focusout', (e) => { const i = e.target; if (i.matches && i.matches('.qty input[data-qty]')) FC.qtyOf(i); });
+  document.addEventListener('change', (e) => { const i = e.target; if (i.matches && i.matches('.qty input[data-qty]')) FC.qtyOf(i); });
+  /* Back/forward cache: a restored page may show an old cart, and a form that was disabled while submitting must work again */
+  window.addEventListener('pageshow', (e) => {
+    if (!e.persisted) return;
+    FC.api('/api/cart');
+    document.querySelectorAll('form[data-once]').forEach((f) => { delete f.dataset.sent; const b = f.querySelector('[type=submit]'); if (b && b.dataset.label) { b.disabled = false; b.innerHTML = b.dataset.label; } });
   });
 
   /* ---------- hero carousel: arrows, dots, swipe, autoplay ---------- */
@@ -136,7 +180,7 @@
     // prevent double submits
     document.querySelectorAll('form[data-once]').forEach((f) => f.addEventListener('submit', (e) => {
       if (f.dataset.sent) { e.preventDefault(); return; } f.dataset.sent = 1;
-      const b = f.querySelector('[type=submit]'); if (b) { b.disabled = true; b.innerHTML = '<span class="spinner"></span> Please wait…'; }
+      const b = f.querySelector('[type=submit]'); if (b) { b.dataset.label = b.innerHTML; b.disabled = true; b.innerHTML = '<span class="spinner"></span> Please wait…'; }
     }));
   });
 })();

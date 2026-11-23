@@ -9,6 +9,7 @@ final class OrderService {
         $d['customer_name'] = trim((string)($in['customer_name'] ?? ''));
         $d['mobile'] = preg_replace('/\D+/', '', (string)($in['mobile'] ?? ''));
         if (strlen($d['mobile']) > 10 && str_starts_with($d['mobile'], '91')) $d['mobile'] = substr($d['mobile'], -10);
+        elseif (strlen($d['mobile']) === 11 && $d['mobile'][0] === '0') $d['mobile'] = substr($d['mobile'], 1);   // 09876543210 -> 9876543210
         $d['email'] = trim((string)($in['email'] ?? ''));
         $d['address'] = trim((string)($in['address'] ?? ''));
         $d['pincode'] = preg_replace('/\D+/', '', (string)($in['pincode'] ?? ''));
@@ -20,7 +21,7 @@ final class OrderService {
         if (mb_strlen($d['customer_name']) < 2 || mb_strlen($d['customer_name']) > 120) $err['customer_name'] = 'Enter your full name.';
         if (!preg_match('/^[6-9]\d{9}$/', $d['mobile'])) $err['mobile'] = 'Enter a valid 10-digit Indian mobile number.';
         if ($d['email'] !== '' && !filter_var($d['email'], FILTER_VALIDATE_EMAIL)) $err['email'] = 'Enter a valid email address.';
-        if (mb_strlen($d['address']) < 10) $err['address'] = 'Enter your complete delivery address.';
+        if (mb_strlen($d['address']) < 5 || mb_strlen($d['address']) > 500) $err['address'] = 'Enter your complete delivery address.';
         if (!preg_match('/^[1-9]\d{5}$/', $d['pincode'])) $err['pincode'] = 'Enter a valid 6-digit pincode.';
         if (mb_strlen($d['city']) < 2) $err['city'] = 'Enter your city.';
         if (!in_array($d['state'], indian_states(), true)) $err['state'] = 'Select your state.';
@@ -30,9 +31,8 @@ final class OrderService {
         }
         $methods = self::paymentMethods();
         if (!isset($methods[$d['payment_method']])) $err['payment_method'] = 'Select a payment option.';
-        if (empty($in['ack_terms'])) $err['ack_terms'] = 'Please accept the terms and conditions.';
-        if (empty($in['ack_age'])) $err['ack_age'] = 'You must confirm you are 18 or older.';
-        if (empty($in['ack_safety'])) $err['ack_safety'] = 'Please acknowledge the safety guidelines.';
+        // NOTE: the old ack_terms / ack_age / ack_safety checkboxes are gone. Only the keys read above are used, so any stale ack_* value
+        // that a cached page or old form still posts is simply ignored: it can neither block the order nor be saved.
         return [$d, $err];
     }
     public static function paymentMethods(): array {
@@ -61,7 +61,7 @@ final class OrderService {
             $pdo->beginTransaction();
             $ids = array_map('intval', array_keys($raw)); sort($ids);
             $in = implode(',', array_fill(0, count($ids), '?'));
-            $rows = DB::all("SELECT id,sku,name,original_price,selling_price,stock,status FROM products WHERE id IN ($in) ORDER BY id FOR UPDATE", $ids);
+            $rows = DB::all("SELECT id,sku,name,original_price," . discount_sql('original_price') . " AS selling_price,stock,status FROM products WHERE id IN ($in) ORDER BY id FOR UPDATE", $ids);
             $by = array_column($rows, null, 'id');
             $lines = []; $orig = 0.0; $sell = 0.0;
             foreach ($raw as $id => $qty) {
@@ -111,8 +111,12 @@ final class OrderService {
             return ['ok' => false, 'message' => 'Could not place your order. Please try again.'];
         }
         $order = DB::one('SELECT * FROM orders WHERE id=?', [$orderId]);
-        MailService::orderConfirmation($order, DB::all('SELECT * FROM order_items WHERE order_id=?', [$orderId]));
         CartService::clear();
+        // The confirmation email is sent AFTER the customer has been redirected to the "Order confirmed" page: a slow or broken mail
+        // server can no longer delay, break or double-submit an order that is already saved. MailService does nothing without an
+        // email address or Email Settings and never throws.
+        $items = DB::all('SELECT * FROM order_items WHERE order_id=?', [$orderId]);
+        after_response(function () use ($order, $items) { MailService::orderConfirmation($order, $items); });
         return ['ok' => true, 'reference' => $ref];
     }
 

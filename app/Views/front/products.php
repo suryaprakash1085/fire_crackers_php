@@ -12,6 +12,7 @@ $hasFilter = $q !== '' || $f['min'] || $f['max'] || $f['instock'] || $cid;
     <form method="get" class="relative mt-4 flex gap-2 max-w-xl" role="search"><?php foreach ($base as $k => $v): if ($k === 'q') continue; ?><input type="hidden" name="<?= e($k) ?>" value="<?= e($v) ?>"><?php endforeach; ?>
       <div class="relative flex-1"><input id="q" name="q" type="search" value="<?= e($q) ?>" placeholder="Search by name, Tamil name or ID…" class="input !pl-10 !border-0 !rounded-full" <?= ($_GET['focus'] ?? '') === 'search' ? 'autofocus' : '' ?>><span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink/40 pointer-events-none"><?= icon('search', 'w-4 h-4') ?></span></div>
       <button class="btn btn-white !rounded-full">Search</button></form>
+    <?php if (App\Services\PriceList::available()): ?><a href="<?= e(url('/price-list')) ?>" class="relative btn btn-white btn-sm !rounded-full mt-3"><?= icon('download', 'w-4 h-4') ?> Download Price List</a><?php endif; ?>
   </div>
 
   <div class="lg:grid lg:grid-cols-[270px_1fr] gap-6 items-start">

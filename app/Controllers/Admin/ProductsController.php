@@ -2,7 +2,7 @@
 namespace App\Controllers\Admin;
 
 use App\Core\DB;
-use App\Services\{MediaService, ProductImportStash, ProductSheet, ProductUploadStash, Xlsx};
+use App\Services\{MediaService, ProductImportStash, ProductSheet, ProductUploadStash, SkuService, Xlsx};
 
 final class ProductsController extends AdminController {
     protected string $minRole = 'admin';
@@ -16,7 +16,7 @@ final class ProductsController extends AdminController {
         if ($stock === 'low') $w[] = 'p.stock<=p.low_stock_threshold';
         $where = implode(' AND ', $w); $per = 15; $page = $this->page();
         $total = (int)DB::val("SELECT COUNT(*) FROM products p WHERE $where", $p);
-        $rows = DB::all("SELECT p.*, c.name category_name, (SELECT path FROM product_images i WHERE i.product_id=p.id ORDER BY i.is_primary DESC,i.sort_order,i.id LIMIT 1) image FROM products p JOIN categories c ON c.id=p.category_id WHERE $where ORDER BY p.id DESC LIMIT $per OFFSET " . (($page - 1) * $per), $p);
+        $rows = DB::all("SELECT p.*, " . discount_sql() . " AS selling_price, " . company_discount() . " AS discount_percent, c.name category_name, (SELECT path FROM product_images i WHERE i.product_id=p.id ORDER BY i.is_primary DESC,i.sort_order,i.id LIMIT 1) image FROM products p JOIN categories c ON c.id=p.category_id WHERE $where ORDER BY p.id DESC LIMIT $per OFFSET " . (($page - 1) * $per), $p);
         $this->render('admin/products/index', ['title' => 'Products', 'rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => max(1, (int)ceil($total / $per)), 'categories' => DB::all('SELECT id,name FROM categories ORDER BY name'), 'f' => compact('q', 'cat', 'st', 'stock')]);
     }
     /** Excel download: ?blank=1 gives an empty template, otherwise every current product (edit & re-upload). */
@@ -127,7 +127,7 @@ final class ProductsController extends AdminController {
         ]);
     }
     public function show(string $id): void {
-        $p = DB::one('SELECT p.*, c.name category_name FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=?', [(int)$id]);
+        $p = DB::one('SELECT p.*, ' . discount_sql() . ' AS selling_price, ' . company_discount() . ' AS discount_percent, c.name category_name FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=?', [(int)$id]);
         if (!$p) redirect('/admin/products');
         $this->render('admin/products/view', ['title' => $p['name'], 'p' => $p, 'images' => DB::all('SELECT * FROM product_images WHERE product_id=? ORDER BY is_primary DESC, sort_order, id', [(int)$id]),
             'sold' => (int)DB::val('SELECT COALESCE(SUM(quantity),0) FROM order_items WHERE product_id=?', [(int)$id])]);
@@ -139,46 +139,63 @@ final class ProductsController extends AdminController {
         $pendingToken = is_string($pendingTokenValue) ? $pendingTokenValue : '';
         $pendingUploads = ProductUploadStash::get($pendingToken);
         if (!$pendingUploads['images'] && !$pendingUploads['video']) $pendingToken = '';
-        $this->render('admin/products/form', ['title' => $p ? 'Edit product' : 'Add product', 'p' => $p, 'categories' => DB::all('SELECT id,name FROM categories ORDER BY name'),
+        $cats = DB::all('SELECT id,name FROM categories ORDER BY name');
+        $this->render('admin/products/form', ['title' => $p ? 'Edit product' : 'Add product', 'p' => $p, 'categories' => $cats, 'skuPreview' => $p ? [] : $this->skuPreview($cats), 'discountPct' => company_discount(),
             'images' => $p ? DB::all('SELECT * FROM product_images WHERE product_id=? ORDER BY is_primary DESC, sort_order, id', [(int)$id]) : [], 'errors' => [],
             'pendingUploadToken' => $pendingToken, 'pendingUploads' => $pendingUploads, 'uploadErrors' => []]);
     }
     public function save(): void {
+        // The files together are bigger than post_max_size: PHP then throws away the WHOLE request ($_POST and $_FILES are empty). Without this
+        // check the admin would see "session expired" or a blank page; now there is a clear message and the form opens again.
+        if (is_post() && !$_POST && !$_FILES && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+            $lim = MediaService::limits();
+            flash('error', 'The files you chose are too big to upload together (' . MediaService::humanSize((int)$_SERVER['CONTENT_LENGTH']) . ' sent, the server accepts at most ' . ($lim['post'] === PHP_INT_MAX ? 'a limited amount' : MediaService::humanSize($lim['post'])) . ' per save). Nothing was saved. Use images of max ' . MediaService::humanSize(MediaService::MAX_BYTES) . ' each, fewer files at once, or a smaller video, then try again.');
+            $ref = (string)parse_url((string)($_SERVER['HTTP_REFERER'] ?? ''), PHP_URL_PATH);
+            redirect(str_starts_with($ref, base_path() . '/admin/products') ? $ref : '/admin/products/create');
+        }
         $this->post();
         $requestedId = (int)($_POST['id'] ?? 0);
         $pendingTokenValue = $_POST['pending_upload_token'] ?? '';
         $pendingTokenInput = is_string($pendingTokenValue) ? $pendingTokenValue : '';
+        if (!empty($_POST['drop_pending']) && is_array($_POST['drop_pending'])) ProductUploadStash::drop($pendingTokenInput, array_values(array_filter($_POST['drop_pending'], 'is_string')));   // kept images the admin ticked "Remove" on
         $stage = ProductUploadStash::stage($pendingTokenInput, $this->uploadedImages(), $this->uploadedVideo());
         $pendingToken = $stage['token'];
         $pendingUploads = ProductUploadStash::get($pendingToken);
         $id = (int)($_POST['id'] ?? 0);
         $existing = $id ? DB::one('SELECT * FROM products WHERE id=?', [$id]) : null;
-        $d = ['sku' => strtoupper(trim((string)($_POST['sku'] ?? ''))), 'name' => trim((string)($_POST['name'] ?? '')), 'name_ta' => mb_substr(trim((string)($_POST['name_ta'] ?? '')), 0, 190) ?: null, 'category_id' => (int)($_POST['category_id'] ?? 0),
+        $d = ['name' => trim((string)($_POST['name'] ?? '')), 'name_ta' => mb_substr(trim((string)($_POST['name_ta'] ?? '')), 0, 190) ?: null, 'category_id' => (int)($_POST['category_id'] ?? 0),
             'description' => trim((string)($_POST['description'] ?? '')), 'safety_notes' => trim((string)($_POST['safety_notes'] ?? '')), 'aliases' => trim((string)($_POST['aliases'] ?? '')),
-            'original_price' => round((float)($_POST['original_price'] ?? 0), 2), 'selling_price' => round((float)($_POST['selling_price'] ?? 0), 2),
+            'original_price' => round((float)($_POST['original_price'] ?? 0), 2),
             'stock' => (int)($_POST['stock'] ?? 0), 'low_stock_threshold' => max(0, (int)($_POST['low_stock_threshold'] ?? 10)),
             'is_featured' => empty($_POST['is_featured']) ? 0 : 1, 'is_popular' => empty($_POST['is_popular']) ? 0 : 1, 'status' => (string)($_POST['status'] ?? 'active')];
         $err = [];
-        if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{1,59}$/', $d['sku'])) $err['sku'] = 'SKU: 2–60 letters, numbers, - or _.';
-        elseif (DB::val('SELECT 1 FROM products WHERE sku=? AND id<>?', [$d['sku'], $id])) $err['sku'] = 'This SKU already exists.';
+        // SKU is never typed by the admin: it is generated by SkuService inside the save transaction (new product) and never changes afterwards.
         if (mb_strlen($d['name']) < 2 || mb_strlen($d['name']) > 190) $err['name'] = 'Name is required (max 190 chars).';
         if (!DB::val('SELECT 1 FROM categories WHERE id=?', [$d['category_id']])) $err['category_id'] = 'Select a category.';
         if ($d['original_price'] <= 0 || $d['original_price'] > 9999999) $err['original_price'] = 'Enter a valid original price.';
-        if ($d['selling_price'] <= 0 || $d['selling_price'] > $d['original_price']) $err['selling_price'] = 'Selling price must be above 0 and not more than the original price.';
         if ($d['stock'] < 0 || $d['stock'] > 10000000) $err['stock'] = 'Invalid stock.';
         if (!in_array($d['status'], ['active', 'inactive', 'archived'], true)) $d['status'] = 'inactive';
-        if ($err) {
-            $this->render('admin/products/form', ['title' => $id ? 'Edit product' : 'Add product', 'p' => $d + ($existing ?? []) + ['id' => $id], 'errors' => $err, 'categories' => DB::all('SELECT id,name FROM categories ORDER BY name'),
+        if ($err || $stage['errors']) {   // a rejected file also stops the save: the form comes back with the message, the good files stay attached (pending_upload_token)
+            $cats = DB::all('SELECT id,name FROM categories ORDER BY name');
+            $this->render('admin/products/form', ['title' => $id ? 'Edit product' : 'Add product', 'p' => $d + ($existing ?? []) + ['id' => $id], 'errors' => $err, 'categories' => $cats, 'skuPreview' => $id ? [] : $this->skuPreview($cats), 'discountPct' => company_discount(),
                 'images' => $id ? DB::all('SELECT * FROM product_images WHERE product_id=? ORDER BY is_primary DESC, sort_order, id', [$id]) : [],
                 'pendingUploadToken' => $pendingToken, 'pendingUploads' => $pendingUploads, 'uploadErrors' => $stage['errors']]); return;
         }
-        $d['discount_percent'] = round(($d['original_price'] - $d['selling_price']) / $d['original_price'] * 100, 2);
-        $slugBase = slugify($d['name']) . '-' . strtolower($d['sku']);
+        // Company-wide discount: original price is stored as entered; these two columns are only a cache (all reads recompute live).
+        $d['selling_price'] = discounted_price($d['original_price']); $d['discount_percent'] = company_discount();
         $pdo = DB::pdo();
         try {
             $pdo->beginTransaction();
-            if ($id) { DB::update('products', $d, 'id=?', [$id]); }
-            else { $d['slug'] = $slugBase; $id = DB::insert('products', $d); }
+            if ($id) { DB::update('products', $d, 'id=?', [$id]); }   // SKU and slug are not in $d: they never change after creation
+            else {
+                // new product: the SKU is reserved while the category row is locked; the UNIQUE index is the last line of defence (retry once or twice)
+                for ($try = 0; ; $try++) {
+                    $d['sku'] = SkuService::next($d['category_id']);
+                    $d['slug'] = slugify($d['name']) . '-' . strtolower($d['sku']);
+                    try { $id = DB::insert('products', $d); break; }
+                    catch (\PDOException $e) { if ($try >= 3 || (int)$e->getCode() !== 23000) throw $e; }
+                }
+            }
             $errs = $stage['errors'];
             // product video: replace or remove
             $oldVideo = $id ? (string)DB::val('SELECT video_path FROM products WHERE id=?', [$id]) : '';
@@ -218,6 +235,11 @@ final class ProductsController extends AdminController {
         foreach ($errs as $m) flash('error', $m);
         flash('success', 'Product saved.');
         redirect("/admin/products/$id");
+    }
+    /** category id => the SKU the next product of that category will get (a hint on the form; the real SKU is reserved on save). */
+    private function skuPreview(array $cats): array {
+        $out = []; foreach ($cats as $c) { try { $out[(int)$c['id']] = SkuService::peek((int)$c['id']); } catch (\Throwable $e) { $out[(int)$c['id']] = ''; } }
+        return $out;
     }
     private function uploadedImages(): array {
         $files = $_FILES['images'] ?? [];

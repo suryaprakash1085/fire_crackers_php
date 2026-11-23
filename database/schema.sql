@@ -76,8 +76,11 @@ CREATE TABLE IF NOT EXISTS `categories` (
   `display_order` int(11) NOT NULL DEFAULT 0,
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `sku_prefix` varchar(8) DEFAULT NULL,
+  `sku_block` int(10) unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `slug` (`slug`),
+  UNIQUE KEY `uq_cat_sku_prefix` (`sku_prefix`),
   KEY `idx_cat_active` (`is_active`,`display_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -312,6 +315,8 @@ CREATE TABLE IF NOT EXISTS `site_settings` (
 
 INSERT IGNORE INTO `schema_migrations` (`migration`, `batch`, `applied_at`) VALUES ('001_initial_schema.sql',1,'2026-10-22 07:29:14'),
 ('002_add_product_tamil_name.sql',1,'2026-10-22 07:29:14'),
-('003_clean_light_theme.sql',1,'2026-10-25 00:00:00');
+('003_clean_light_theme.sql',1,'2026-10-25 00:00:00'),
+('004_add_product_video.sql',1,'2026-10-25 00:00:00');
+-- 005 (default discount setting) and 006 (logo / UPI settings, automatic SKU columns) are idempotent: run `php bin/console migrate` after importing this file.
 
 

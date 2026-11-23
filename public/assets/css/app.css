@@ -210,6 +210,18 @@ body.drawer-open .drawer{transform:none}body.drawer-open .drawer-scrim{opacity:1
 .qo-bar.show{transform:translate(-50%,0)}
 @media(min-width:1024px){.qo-bar{bottom:1.4rem}}
 
+/* ---------- Quick Order: minimum-order balance (small card above the floating pill + the cart side panel) ---------- */
+.min-line{font-size:.78rem;font-weight:600;line-height:1.35;text-align:center}
+.min-line[hidden],.min-track[hidden]{display:none}
+.min-track{display:block;height:4px;margin-top:.4rem;border-radius:999px;background:rgb(var(--c-text-rgb) / .12);overflow:hidden}
+.min-fill{display:block;height:100%;width:0;border-radius:inherit;background:var(--c-accent);transition:width .3s}
+.min-line.ok{color:#166534}
+.min-line.in-panel{margin-top:.6rem;padding:.55rem .75rem;border-radius:.75rem;background:#fffbeb;color:#92400e;text-align:left}
+.min-line.in-panel.ok{background:#f0fdf4;color:#166534}
+.qo-bar .min-line{position:absolute;left:0;right:0;bottom:calc(100% + .5rem);padding:.5rem .9rem .55rem;border-radius:1rem;background:#fff;color:var(--c-text);border:1px solid rgb(var(--c-text-rgb) / .08);box-shadow:0 10px 28px rgb(0 0 0 / .2)}
+.qo-bar .min-line.ok{background:#f0fdf4;border-color:#bbf7d0}
+.qo-bar:not(.show) .min-line{display:none}
+
 /* ---------- burning fuse divider ---------- */
 .fuse{position:relative;height:3px;border-radius:3px;background:repeating-linear-gradient(90deg,#b98a4e 0 8px,transparent 8px 13px)}
 .fuse i{position:absolute;top:50%;left:0;width:18px;height:18px;margin-top:-9px;border-radius:50%;background:radial-gradient(circle,#fff 0 18%,#ffd54a 32%,#ff7a00 55%,transparent 72%);filter:drop-shadow(0 0 8px #ff9f1a);animation:burn 7s linear infinite}
@@ -231,7 +243,7 @@ img,svg,video,canvas{max-width:100%}
 @media(min-width:1280px){.nb-bar{padding:0 2.5rem}}
 @media(min-width:1536px){.nb-bar{padding:0 4rem}}
 .nb-brand{display:flex;align-items:center;gap:.65rem;min-width:0;flex:0 1 auto;text-decoration:none;color:inherit}
-.nb-logo{height:2.5rem;width:auto;max-width:3.5rem;object-fit:contain;flex-shrink:0}
+.nb-logo{height:2.5rem;width:auto;max-width:9rem;object-fit:contain;flex-shrink:0}
 .nb-logo-fallback{width:2.5rem;height:2.5rem;border-radius:.75rem;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
 .nb-brand-text{font-weight:700;font-size:1rem;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 @media(min-width:640px){.nb-brand-text{font-size:1.1rem}}
@@ -277,3 +289,4 @@ img,svg,video,canvas{max-width:100%}
 @media(min-width:1024px){.wa-float{right:1.25rem;bottom:1.25rem;width:3.5rem;height:3.5rem}}
 /* when the Quick Order bar slides up, lift the button above it instead of overlapping */
 @media(max-width:1023px){body:has(.qo-bar.show) .wa-float{bottom:calc(8.6rem + env(safe-area-inset-bottom))}}
+@media(max-width:1023px){body:has(.qo-bar.show .min-line:not([hidden])) .wa-float{bottom:calc(12.4rem + env(safe-area-inset-bottom))}}   /* keep the WhatsApp button clear of the minimum-order card */

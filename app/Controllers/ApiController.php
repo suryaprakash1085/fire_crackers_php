@@ -12,7 +12,10 @@ final class ApiController extends Controller {
     public function cart(): void { $this->cartJson(); }
     public function add(): void {
         $this->requireCsrf(true);
-        $r = CartService::add((int)$this->input('product_id'), max(1, (int)$this->input('qty', '1')), $this->src());
+        // The quantity must be exactly what the shopper saw: a whole number >= 1. Anything else (0, -2, 2.5, "abc") is rejected, not silently "fixed".
+        $qty = parse_qty($this->input('qty', '1'));
+        if ($qty === null) $this->json(['ok' => false, 'status' => 'invalid', 'added' => 0, 'message' => 'Quantity must be a whole number of 1 or more.', 'cart' => CartService::summary()], 422);
+        $r = CartService::add((int)$this->input('product_id'), min($qty, 100000), $this->src());
         $this->json($r + ['cart' => CartService::summary()], $r['ok'] ? 200 : 422);
     }
     /** Quick Order: add many products in one request. items = JSON [{id, qty}, …]. Each line is validated server-side. */
@@ -32,10 +35,31 @@ final class ApiController extends Controller {
         }
         $this->json(['ok' => $added > 0, 'added_count' => $added, 'results' => $results, 'cart' => CartService::summary()]);
     }
+    /** Quick Order "Add to cart": the input in each row is the TOTAL quantity wanted, so the cart quantity is REPLACED by it (0 removes the product).
+     *  Never adds on top, so a double click or a retry cannot double the quantity. items = JSON [{id, qty}, …]. One response carries the whole
+     *  cart (results + cart summary) so the page can redraw the panel, badge, table inputs and bottom bar from it. */
+    public function setMany(): void {
+        $this->requireCsrf(true);
+        if (RateLimiter::tooMany('cart_set_many', client_ip(), 120, 600)) $this->json(['ok' => false, 'message' => 'Too many requests. Please slow down.'], 429);
+        RateLimiter::hit('cart_set_many', client_ip());
+        $raw = json_decode($this->input('items', '[]'), true);
+        if (!is_array($raw) || !$raw) $this->json(['ok' => false, 'message' => 'Nothing to update.', 'cart' => CartService::summary()], 422);
+        $lines = []; $invalid = [];
+        foreach (array_slice($raw, 0, 400) as $it) {
+            $id = filter_var(is_array($it) ? ($it['id'] ?? null) : null, FILTER_VALIDATE_INT);
+            $qty = filter_var(is_array($it) ? ($it['qty'] ?? null) : null, FILTER_VALIDATE_INT);
+            if ($id === false || $id < 1 || $qty === false || $qty < 0) { $invalid[] = ['id' => (int)$id, 'name' => '', 'requested' => 0, 'in_cart' => 0, 'status' => 'invalid', 'message' => 'Quantity must be a whole number (0 or more).']; continue; }
+            $lines[$id] = min($qty, 100000);   // same product twice: the last value wins
+        }
+        $r = CartService::setMany($lines, 'quick_order');
+        $this->json(['ok' => true, 'changed_count' => $r['changed'], 'results' => array_merge($r['results'], $invalid), 'cart' => CartService::summary()]);
+    }
     public function update(): void {
         $this->requireCsrf(true);
-        $r = CartService::set((int)$this->input('product_id'), (int)$this->input('qty'));
-        $this->json($r + ['cart' => CartService::summary()]);
+        $qty = parse_qty($this->input('qty'));
+        if ($qty === null) $this->json(['ok' => false, 'message' => 'Quantity must be a whole number of 1 or more. Use the remove button to delete an item.', 'cart' => CartService::summary()], 422);
+        $r = CartService::set((int)$this->input('product_id'), min($qty, 100000));
+        $this->json($r + ['cart' => CartService::summary()], $r['ok'] ? 200 : 422);
     }
     public function remove(): void { $this->requireCsrf(true); CartService::remove((int)$this->input('product_id')); $this->cartJson(['message' => 'Removed.']); }
     public function clear(): void { $this->requireCsrf(true); CartService::clear(); $this->cartJson(['message' => 'Cart cleared.']); }

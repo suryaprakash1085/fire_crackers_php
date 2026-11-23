@@ -13,9 +13,13 @@
       <h1 class="text-2xl md:text-4xl font-bold mt-2 leading-tight"><?= e($p['name']) ?></h1><?php if (!empty($p['name_ta'])): ?><p class="muted mt-1"><?= e($p['name_ta']) ?></p><?php endif; ?>
       <p class="text-sm muted mt-1">Product ID / SKU: <span class="font-mono font-semibold"><?= e($p['sku']) ?></span> · ID <?= (int)$p['id'] ?></p>
       <div class="mt-4 flex items-baseline gap-3 flex-wrap"><span class="text-4xl font-bold font-display" style="color:var(--c-primary)"><?= money($p['selling_price']) ?></span><?php if ($disc > 0): ?><s class="muted"><?= money($p['original_price']) ?></s><span class="badge text-white" style="background:var(--c-primary)"><?= e(rtrim(rtrim(number_format($disc, 1), '0'), '.')) ?>% OFF</span><?php endif; ?></div>
+      <?php if ($disc > 0): $damt = max(0, (float)$p['original_price'] - (float)$p['selling_price']); ?><dl class="mt-3 rounded-xl border border-black/10 bg-white/60 p-3 text-sm max-w-xs space-y-1" aria-label="Price breakdown">
+        <div class="flex justify-between"><dt class="muted">Original price</dt><dd><s><?= money($p['original_price']) ?></s></dd></div>
+        <div class="flex justify-between"><dt class="muted">Discount (<?= e(rtrim(rtrim(number_format($disc, 2), '0'), '.')) ?>%)</dt><dd class="text-green-700">− <?= money($damt) ?></dd></div>
+        <div class="flex justify-between border-t border-black/10 pt-1"><dt class="font-semibold">Final price</dt><dd class="font-bold" style="color:var(--c-primary)"><?= money($p['selling_price']) ?></dd></div></dl><?php endif; ?>
       <p class="mt-3"><span class="badge <?= $sc ?> !text-xs"><?= e($sl) ?></span></p>
       <div class="mt-5 flex items-center gap-3 flex-wrap">
-        <?php if (!$out): ?><div class="qty"><button type="button" data-step="-1" aria-label="Decrease quantity">−</button><input type="number" value="1" min="1" max="<?= (int)$p['stock'] ?>" aria-label="Quantity"><button type="button" data-step="1" aria-label="Increase quantity">+</button></div><?php endif; ?>
+        <?php if (!$out): ?><div class="qty"><button type="button" data-step="-1" aria-label="Decrease quantity">−</button><input type="number" value="1" min="1" max="<?= min((int)$p['stock'], max(1, (int)setting('max_qty_per_item', 500))) ?>" step="1" inputmode="numeric" data-qty aria-label="Quantity"><button type="button" data-step="1" aria-label="Increase quantity">+</button></div><?php endif; ?>
         <button type="button" data-add="<?= (int)$p['id'] ?>" class="btn btn-primary btn-lg flex-1 sm:flex-none sm:min-w-[220px]" <?= $out ? 'disabled' : '' ?>><?= icon('shopping-cart', 'w-4 h-4') ?><?= $out ? 'Out of stock' : 'Add to Cart' ?></button>
         <a href="<?= e(url('/cart')) ?>" class="btn btn-outline btn-lg">Go to cart</a>
       </div>

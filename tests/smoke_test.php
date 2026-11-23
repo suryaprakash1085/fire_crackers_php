@@ -17,6 +17,7 @@ $baseOpt = null; foreach ($argv as $a) if (str_starts_with($a, '--base=')) $base
 /* ---------- fresh database ---------- */
 Migrator::dropAll(); Migrator::run(); Seeder::run(true, fn($m) => null);
 \App\Models\Setting::set('min_order_amount', '0');
+\App\Models\Setting::set('company_discount_percent', '20');
 DB::insert('admins', ['name' => 'Owner', 'email' => 'owner@example.com', 'password_hash' => password_hash('SuperSecret123', PASSWORD_DEFAULT), 'role' => 'superadmin']);
 DB::insert('admins', ['name' => 'Helper', 'email' => 'staff@example.com', 'password_hash' => password_hash('StaffSecret123', PASSWORD_DEFAULT), 'role' => 'staff']);
 
@@ -61,7 +62,7 @@ $FP = sid('FP101'); $SP = sid('SP201'); $GC = sid('GC301');
 
 /* ---------- public pages ---------- */
 [$c, $H] = fresh();
-foreach ([['/', 'Light Up Your Festival'], ['/products', 'Flower Pot Big'], ['/product-details.php?id=' . $FP, 'Safety information'], ['/product-details.php?id=' . $FP, 'பூந்தொட்டி'], ['/quick-order', 'Quick Order'], ['/voice-order', 'Start Speaking'], ['/cart', 'Shopping Cart'],
+foreach ([['/', 'Light Up Your Festival'], ['/products?q=Flower+Pot', 'Flower Pot Big'], ['/product-details.php?id=' . $FP, 'Safety information'], ['/product-details.php?id=' . $FP, 'பூந்தொட்டி'], ['/quick-order', 'Quick Order'], ['/voice-order', 'Start Speaking'], ['/cart', 'Shopping Cart'],
           ['/about', 'About Us'], ['/services', 'Home Delivery'], ['/policy/privacy', 'Privacy Policy'], ['/policy/safety', 'Safety'], ['/contact', 'Contact Us'], ['/track', 'Track Your Order'], ['/products?category=2', 'Sparklers']] as [$p, $needle]) {
     $r = $c->get($p); check("GET $p", $r['s'] === 200 && str_contains($r['b'], $needle), $r['s']);
 }
@@ -195,36 +196,39 @@ check('print view', str_contains($a->get("/admin/orders/$oid/print")['b'], $ref)
 $a->post("/admin/orders/$oid/status", ['_csrf' => $AT, 'status' => 'cancelled', 'note' => 'test']); check('cancel restores stock', stock('SP201') === $before);
 check('cancelled order cannot be reopened', str_contains($a->post("/admin/orders/$oid/status", ['_csrf' => $AT, 'status' => 'packed'])['b'], 'cannot be reopened'));
 /* products */
-$pf = ['_csrf' => $AT, 'sku' => 'tst901', 'name' => 'Test <b>Rocket</b>', 'name_ta' => 'சோதனை', 'category_id' => '1', 'original_price' => '100', 'selling_price' => '80', 'stock' => '5', 'low_stock_threshold' => '10', 'status' => 'active', 'description' => 'd', 'aliases' => 'test rocket'];
+$pf = ['_csrf' => $AT, 'sku' => 'HACK999', 'selling_price' => '1', 'name' => 'Test <b>Rocket</b>', 'name_ta' => 'சோதனை', 'category_id' => '1', 'original_price' => '100', 'stock' => '5', 'low_stock_threshold' => '10', 'status' => 'active', 'description' => 'd', 'aliases' => 'test rocket'];
 $imgPath = sys_get_temp_dir() . '/fc-pending-' . getmypid() . '.png';
 file_put_contents($imgPath, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='));
 $videoPath = sys_get_temp_dir() . '/fc-pending-' . getmypid() . '.mp4';
 file_put_contents($videoPath, "\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom");
-$invalidWithImage = ['selling_price' => '500'] + $pf + [
+$invalidWithImage = ['original_price' => '0'] + $pf + [
     'images[0]' => new CURLFile($imgPath, 'image/png', 'pending-product.png'),
     'video' => new CURLFile($videoPath, 'video/mp4', 'pending-product.mp4'),
 ];
 $r = $a->post('/admin/products/save', $invalidWithImage);
 preg_match('/name="pending_upload_token" value="([a-f0-9]{32})"/', $r['b'], $pendingMatch); $pendingToken = $pendingMatch[1] ?? '';
-check('product form keeps image and video after validation error', $pendingToken !== '' && str_contains($r['b'], 'pending-product.png') && str_contains($r['b'], 'pending-product.mp4') && str_contains($r['b'], 'not more than the original'));
+check('product form keeps image and video after validation error', $pendingToken !== '' && str_contains($r['b'], 'pending-product.png') && str_contains($r['b'], 'pending-product.mp4') && str_contains($r['b'], 'valid original price'));
 $r = $a->post('/admin/products/save', $pf + ['pending_upload_token' => $pendingToken]);
-check('product create (discount computed)', str_contains($r['b'], 'Product saved') && (float)DB::val("SELECT discount_percent FROM products WHERE sku='TST901'") === 20.0);
-check('kept image saved after corrected product submit', (int)DB::val("SELECT COUNT(*) FROM product_images i JOIN products p ON p.id=i.product_id WHERE p.sku='TST901'") === 1);
-$savedVideo = (string)DB::val("SELECT video_path FROM products WHERE sku='TST901'");
+$TSKU = (string)DB::val("SELECT sku FROM products WHERE original_price=100 AND category_id=1 ORDER BY id DESC LIMIT 1");
+check('product create (company discount applied automatically)', str_contains($r['b'], 'Product saved') && (float)DB::val("SELECT selling_price FROM products WHERE sku=?", [$TSKU]) === 80.0 && (float)DB::val("SELECT original_price FROM products WHERE sku=?", [$TSKU]) === 100.0);
+check('SKU is generated automatically (category prefix + number); the posted SKU and selling price are ignored', (bool)preg_match('/^FP\d{3,}$/', $TSKU) && $TSKU !== 'FP101' && !DB::val("SELECT 1 FROM products WHERE sku='HACK999'") && (float)DB::val("SELECT discount_percent FROM products WHERE sku=?", [$TSKU]) === 20.0);
+check('kept image saved after corrected product submit', (int)DB::val("SELECT COUNT(*) FROM product_images i JOIN products p ON p.id=i.product_id WHERE p.sku='" . $TSKU . "'") === 1);
+$savedVideo = (string)DB::val("SELECT video_path FROM products WHERE sku='" . $TSKU . "'");
 check('kept video saved after corrected product submit', $savedVideo !== '' && is_file(PUBLIC_PATH . '/' . $savedVideo));
 @unlink($imgPath); @unlink($videoPath);
 $b = (new Http($BASE))->get('/products')['b']; check('XSS escaped in product name', str_contains($b, '&lt;b&gt;Rocket') && !str_contains($b, '<b>Rocket'));
-check('selling > original rejected', str_contains($a->post('/admin/products/save', ['selling_price' => '500'] + $pf)['b'], 'not more than the original'));
-check('duplicate SKU rejected', str_contains($a->post('/admin/products/save', ['sku' => 'FP101'] + $pf)['b'], 'already exists'));
+check('zero original price rejected', str_contains($a->post('/admin/products/save', ['original_price' => '0'] + $pf)['b'], 'valid original price'));
+$beforeSku = (int)DB::val("SELECT COUNT(*) FROM products WHERE sku='FP101'"); $a->post('/admin/products/save', ['sku' => 'FP101'] + $pf);
+check('posting an existing SKU cannot create or duplicate it', (int)DB::val("SELECT COUNT(*) FROM products WHERE sku='FP101'") === $beforeSku);
 check('category with products cannot be deleted', str_contains($a->post('/admin/categories/1/delete', ['_csrf' => $AT])['b'], 'has products'));
-$a->post('/admin/products/' . sid('TST901') . '/archive', ['_csrf' => $AT]); check('archived product hidden from customers', (new Http($BASE))->get('/product-details.php?id=' . sid('TST901'))['s'] === 404);
+$a->post('/admin/products/' . sid($TSKU) . '/archive', ['_csrf' => $AT]); check('archived product hidden from customers', (new Http($BASE))->get('/product-details.php?id=' . sid($TSKU))['s'] === 404);
 $exportFile = tempnam(sys_get_temp_dir(), 'fc_export_');
 $defaultExport = $a->get('/admin/products/template'); file_put_contents($exportFile, $defaultExport['b']);
 $defaultRows = \App\Services\Xlsx::read($exportFile, 'Products');
 $allExport = $a->get('/admin/products/template?include_archived=1'); file_put_contents($exportFile, $allExport['b']);
 $allRows = \App\Services\Xlsx::read($exportFile, 'Products');
-check('Excel export omits archived products by default', !in_array((string)sid('TST901'), array_column($defaultRows, 0), true));
-check('Excel export option includes archived products', in_array((string)sid('TST901'), array_column($allRows, 0), true));
+check('Excel export omits archived products by default', !in_array((string)sid($TSKU), array_column($defaultRows, 0), true));
+check('Excel export option includes archived products', in_array((string)sid($TSKU), array_column($allRows, 0), true));
 @unlink($exportFile);
 /* customization */
 $cz = ['_csrf' => $AT, 'brand_name' => 'Test Brand', 'color_primary' => '#112233', 'color_secondary' => '#445566', 'color_accent' => '#778899', 'color_bg' => '#FFFFFF', 'color_text' => '#111111', 'color_button' => '#0A0B0C', 'color_button_text' => '#FFFFFF', 'header_style' => 'white', 'footer_style' => 'white', 'delivery_charge' => '80', 'free_delivery_above' => '2000', 'min_order_amount' => '0', 'bulk_discount_min' => '0', 'bulk_discount_percent' => '0', 'max_qty_per_item' => '500', 'restricted_states' => '', 'payment_cod_enabled' => '1', 'payment_cod_label' => 'COD', 'show_offers' => '1'];
@@ -296,7 +300,7 @@ check('preview confirm saves data', str_contains($rConf['b'], 'Products updated'
 [$jv, $Hj] = fresh(); $want = ['FP101' => 5, 'SP201' => 2, 'GC301' => 3, 'GB801' => 1, 'SC501' => 4]; $sb = []; foreach ($want as $k0 => $_) $sb[$k0] = stock($k0);
 $j = $jv->json('POST', '/api/voice/parse', ['text' => 'add five flower pots, two sparklers, three ground chakras, one family gift box and four lakshmi crackers', 'lang' => 'en'], $Hj);
 check('journey: voice added all 5 products from one sentence', count($j['items']) === 5 && $j['level'] === 'success', $j['summary'] ?? '');
-$sell = 0.0; $mrp = 0.0; foreach ($want as $sku => $q0) { $pr = DB::one('SELECT original_price,selling_price FROM products WHERE sku=?', [$sku]); $sell += $pr['selling_price'] * $q0; $mrp += $pr['original_price'] * $q0; }
+$sell = 0.0; $mrp = 0.0; foreach ($want as $sku => $q0) { $pr = DB::one('SELECT original_price FROM products WHERE sku=?', [$sku]); $sell += discounted_price($pr['original_price']) * $q0; $mrp += $pr['original_price'] * $q0; }
 $deliv = $sell >= (float)setting('free_delivery_above') ? 0.0 : (float)setting('delivery_charge'); $expTotal = round($sell + $deliv, 2);
 check('journey: cart total follows server price + delivery rules', abs($j['cart']['total'] - $expTotal) < 0.01 && abs($j['cart']['delivery'] - $deliv) < 0.01, [$j['cart']['total'], $expTotal]);
 $r = $jv->get('/checkout'); preg_match('/name="checkout_token" value="([^"]+)"/', $r['b'], $m);
@@ -308,10 +312,10 @@ $got = []; foreach (DB::all('SELECT sku,quantity FROM order_items WHERE order_id
 check('journey: all 5 order lines with exact quantities', $got === $w2, $got);
 $okStock = true; foreach ($want as $k0 => $q0) if ($sb[$k0] - stock($k0) !== $q0) $okStock = false; check('journey: stock reduced for every product', $okStock);
 check('journey: cart is empty after the order', $jv->json('GET', '/api/cart')['cart']['count'] === 0);
-DB::exec("UPDATE products SET selling_price=1, original_price=1 WHERE sku='FP101'");
+DB::exec("UPDATE products SET original_price=1 WHERE sku='FP101'");
 $jt = new Http($BASE); $jtt = csrf($jt->get('/track')['b']); $tb = $jt->post('/track', ['_csrf' => $jtt, 'reference' => $jref, 'mobile' => '9123456780'])['b'];
 check('journey: price change later does NOT alter the order (snapshot)', str_contains($tb, number_format((float)$ord['total'], 2)) && str_contains($tb, 'Flower Pot Big'));
-DB::exec("UPDATE products SET selling_price=96, original_price=120 WHERE sku='FP101'");
+DB::exec("UPDATE products SET original_price=120 WHERE sku='FP101'");
 check('journey: admin finds it under Voice Order', str_contains($a->get('/admin/orders?source=voice_order&q=' . urlencode($jref))['b'], 'Journey Test'));
 $jid = (int)$ord['id']; $vb = $a->get("/admin/orders/$jid")['b']; check('journey: admin order page shows all items', substr_count($vb, 'Lakshmi Crackers') >= 1 && str_contains($vb, 'Family Gift Box') && str_contains($vb, 'Ground Chakra'));
 foreach (['confirmed', 'processing', 'packed', 'shipped'] as $stt) { $a->post("/admin/orders/$jid/status", ['_csrf' => $AT, 'status' => $stt, 'note' => '']); }
@@ -324,6 +328,181 @@ check('journey: customer sees Cancelled', str_contains($jt->post('/track', ['_cs
 $cf = new Http($BASE); $ctk = csrf($cf->get('/contact')['b']);
 $cf->post('/contact', ['_csrf' => $ctk, 'name' => 'Asha', 'mobile' => '9876543210', 'message' => 'Do you deliver to my area?']); check('contact enquiry saved', (int)DB::val('SELECT COUNT(*) FROM contact_enquiries') === 1);
 check('enquiry visible to admin', str_contains($a->get('/admin/enquiries')['b'], 'Do you deliver'));
+
+/* ---------- NEW: global company discount ---------- */
+$cp = $a->get('/admin/company'); check('company page has the Discount Percentage field', str_contains($cp['b'], 'name="company_discount_percent"'));
+check('product form has NO manual selling price field', !str_contains($a->get('/admin/products/create')['b'], 'name="selling_price"'));
+check('company discount >90 rejected', str_contains($a->post('/admin/company', ['_csrf' => $AT, 'company_discount_percent' => '95'])['b'], 'cannot exceed 90'));
+$a->post('/admin/company', ['_csrf' => $AT, 'company_discount_percent' => '10']);
+check('company discount saved once in settings', (string)DB::val("SELECT setting_value FROM site_settings WHERE setting_key='company_discount_percent'") === '10.00' || (float)DB::val("SELECT setting_value FROM site_settings WHERE setting_key='company_discount_percent'") === 10.0);
+DB::exec("UPDATE products SET original_price=1000 WHERE sku='SP201'"); $SPid = sid('SP201');
+$pg = (new Http($BASE))->get("/product-details.php?id=$SPid")['b'];
+check('product page: 10% of ₹1,000 = ₹900 (strike original, discount, final)', str_contains($pg, '₹900.00') && str_contains($pg, '₹1,000.00') && str_contains($pg, '₹100.00') && str_contains($pg, '10% OFF') && str_contains($pg, '<s'));
+check('stored original price never overwritten', (float)DB::val("SELECT original_price FROM products WHERE sku='SP201'") === 1000.0);
+$a->post('/admin/company', ['_csrf' => $AT, 'company_discount_percent' => '20']);
+check('discount change to 20% recalculates every product (₹800)', str_contains((new Http($BASE))->get("/product-details.php?id=$SPid")['b'], '₹800.00'));
+check('listing shows the same discounted price', str_contains((new Http($BASE))->get('/products')['b'], '₹800.00'));
+check('quick order shows the same discounted price', str_contains((new Http($BASE))->get('/quick-order')['b'], '₹800.00'));
+[$cd, $Hd] = fresh(); $j = $cd->json('POST', '/api/cart/add', ['product_id' => $SPid, 'qty' => 2], $Hd);
+check('cart uses discounted price (2 × ₹800)', abs($j['cart']['subtotal'] - 2000.0) < 0.01 && abs(($j['cart']['items'][0]['unit_price'] ?? 0) - 800.0) < 0.01, $j['cart'] ?? $j);
+$r = $cd->get('/checkout'); preg_match('/name="checkout_token" value="([^"]+)"/', $r['b'], $m);
+$r = $cd->post('/checkout', ['_csrf' => formCsrf($r['b']), 'checkout_token' => $m[1]] + $form); preg_match('/FC-[A-Z0-9]{5}-[A-Z0-9]{5}/', $r['b'], $m); $dref = $m[0] ?? '';
+$dord = DB::one('SELECT * FROM orders WHERE reference=?', [$dref]) ?: [];
+check('order total uses discounted price + snapshot of original', $dref !== '' && abs($dord['subtotal'] - 2000.0) < 0.01 && (float)DB::val('SELECT unit_price FROM order_items WHERE order_id=?', [$dord['id']]) === 800.0 && (float)DB::val('SELECT original_price FROM order_items WHERE order_id=?', [$dord['id']]) === 1000.0, $dord);
+$a->post('/admin/company', ['_csrf' => $AT, 'company_discount_percent' => '10']);
+check('discount change does not alter an existing order', (float)DB::val('SELECT unit_price FROM order_items WHERE order_id=?', [$dord['id']]) === 800.0);
+
+/* ---------- NEW: order popups (view / edit / invoice / pdf / cancel) ---------- */
+$did = (int)$dord['id'];
+$idx = $a->get('/admin/orders')['b'];
+check('orders list has 4 action icons per order', str_contains($idx, 'data-om="view"') && str_contains($idx, 'data-om="edit"') && str_contains($idx, 'data-om="pdf"') && str_contains($idx, 'data-om="cancel"') && str_contains($idx, 'id="om-modal"') && str_contains($idx, 'id="om-confirm"'));
+$mv = $a->get("/admin/orders/$did/modal")['b'];
+check('view modal shows id, customer, products, qty, prices, payment, address, date, status', str_contains($mv, $dref) && str_contains($mv, 'Ravi Kumar') && str_contains($mv, 'Sparkler') && str_contains($mv, '₹1,000.00') && str_contains($mv, '₹800.00') && str_contains($mv, 'Shipping address') && str_contains($mv, 'Payment') && str_contains($mv, 'Order date') && str_contains($mv, 'Order Placed'));
+$ev = $a->get("/admin/orders/$did/edit")['b'];
+check('edit modal has customer, address, items, discount, payment, status + Save/Cancel', str_contains($ev, 'name="customer_name"') && str_contains($ev, 'name="address"') && str_contains($ev, '[qty]') && str_contains($ev, 'name="extra_discount"') && str_contains($ev, 'name="payment_status"') && str_contains($ev, 'name="status"') && str_contains($ev, 'Save Changes') && str_contains($ev, 'data-om-close'));
+$inv = $a->get("/admin/orders/$did/invoice")['b'];
+check('invoice preview shows company, customer, order id, products, totals, payment', str_contains($inv, 'INVOICE') && str_contains($inv, $dref) && str_contains($inv, 'Ravi Kumar') && str_contains($inv, 'Payment information') && str_contains($inv, 'Sparkler'));
+$pdf = $a->get("/admin/orders/$did/pdf");
+check('PDF download is a real PDF file', str_starts_with($pdf['b'], '%PDF-1.4') && str_contains($pdf['b'], '%%EOF') && str_contains($pdf['b'], 'Helvetica'));
+$tmpPdf = sys_get_temp_dir() . '/fc-inv.pdf'; file_put_contents($tmpPdf, $pdf['b']); $pi = @shell_exec('pdfinfo ' . escapeshellarg($tmpPdf) . ' 2>&1'); if ($pi && str_contains($pi, 'Pages')) check('PDF opens in a PDF reader (pdfinfo)', str_contains($pi, 'Pages:') && str_contains($pi, 'A4'), $pi); $pt = @shell_exec('pdftotext ' . escapeshellarg($tmpPdf) . ' - 2>&1'); if ($pt && !str_contains($pt, 'not found')) check('PDF text has order id, customer, totals', str_contains($pt, $dref) && str_contains($pt, 'Ravi Kumar') && str_contains($pt, 'TOTAL'), $pt); @unlink($tmpPdf);
+check('anon cannot open order popups/PDF', (new Http($BASE, false))->get("/admin/orders/$did/modal")['s'] === 302 && (new Http($BASE, false))->get("/admin/orders/$did/pdf")['s'] === 302);
+/* edit: change customer, qty, price, add a product, discount, payment, status */
+$st0 = stock('SP201'); $gcStock0 = stock('GC301'); $gcId = sid('GC301'); $gcOrig = (float)DB::val("SELECT original_price FROM products WHERE sku='GC301'");
+$itemId = (int)DB::val('SELECT id FROM order_items WHERE order_id=?', [$did]);
+$edit = ['_csrf' => $AT, 'customer_name' => 'Ravi Edited', 'mobile' => '9123456789', 'email' => 'r@example.com', 'address' => '99 New Street, Madurai', 'pincode' => '625002', 'city' => 'Madurai', 'state' => 'Tamil Nadu', 'landmark' => 'Temple', 'notes' => '', 'delivery_charge' => '50', 'extra_discount' => '100', 'payment_method' => 'cod', 'payment_status' => 'paid', 'status' => 'confirmed', 'tracking_info' => 'TRK1', 'internal_notes' => 'edited',
+  'items' => [0 => ['item_id' => $itemId, 'product_id' => sid('SP201'), 'qty' => 3, 'original_price' => '1000', 'unit_price' => '900'], 1 => ['item_id' => '', 'product_id' => $gcId, 'qty' => 2, 'original_price' => (string)$gcOrig, 'unit_price' => (string)$gcOrig]]];
+$flat = function (array $d, string $pre = '') use (&$flat) { $o = []; foreach ($d as $k => $v) { $key = $pre === '' ? $k : $pre . '[' . $k . ']'; if (is_array($v)) $o += $flat($v, $key); else $o[$key] = $v; } return $o; };
+$j = $a->json('POST', "/admin/orders/$did/edit", $flat($edit), ['X-CSRF-Token' => $AT]);
+$ed = DB::one('SELECT * FROM orders WHERE id=?', [$did]);
+$expSub = 3 * 1000 + 2 * $gcOrig; $expSell = 3 * 900 + 2 * $gcOrig; $expTotal = round($expSell - 100 + 50, 2);
+check('edit saved ok', ($j['ok'] ?? false) === true, $j);
+check('edit: customer/contact/address updated', $ed['customer_name'] === 'Ravi Edited' && $ed['mobile'] === '9123456789' && $ed['address'] === '99 New Street, Madurai' && $ed['pincode'] === '625002' && $ed['payment_status'] === 'paid' && $ed['status'] === 'confirmed');
+check('edit: totals recalculated (subtotal, discount, delivery, total)', abs($ed['subtotal'] - $expSub) < 0.01 && abs($ed['discount_total'] - ($expSub - $expSell + 100)) < 0.01 && abs($ed['delivery_charge'] - 50) < 0.01 && abs($ed['total'] - $expTotal) < 0.01, [$ed['subtotal'], $ed['discount_total'], $ed['total'], $expTotal]);
+check('edit: item added, qty/price updated', (int)DB::val('SELECT COUNT(*) FROM order_items WHERE order_id=?', [$did]) === 2 && (int)DB::val('SELECT quantity FROM order_items WHERE id=?', [$itemId]) === 3 && (float)DB::val('SELECT unit_price FROM order_items WHERE id=?', [$itemId]) === 900.0);
+check('edit: stock synced (qty 2→3 takes 1 more; new product takes 2)', stock('SP201') === $st0 - 1 && stock('GC301') === $gcStock0 - 2, [stock('SP201'), $st0, stock('GC301'), $gcStock0]);
+check('edit logged in status history', str_contains((string)DB::val("SELECT GROUP_CONCAT(note) FROM order_status_history WHERE order_id=$did"), 'Order edited by admin'));
+$bad1 = $flat(array_replace_recursive($edit, ['mobile' => '123'])); check('edit: invalid mobile rejected', ($a->json('POST', "/admin/orders/$did/edit", $bad1, ['X-CSRF-Token' => $AT])['ok'] ?? true) === false);
+$bad2 = $edit; $bad2['items'][0]['unit_price'] = '1500'; check('edit: final price above original rejected', ($a->json('POST', "/admin/orders/$did/edit", $flat($bad2), ['X-CSRF-Token' => $AT])['message'] ?? '') === 'Final price cannot be more than the original price.');
+$bad3 = $edit; $bad3['items'] = []; check('edit: empty product list rejected', ($a->json('POST', "/admin/orders/$did/edit", $flat($bad3), ['X-CSRF-Token' => $AT])['ok'] ?? true) === false);
+$bad4 = $edit; $bad4['items'][1]['qty'] = '99999'; check('edit: more than available stock rejected and rolled back', ($a->json('POST', "/admin/orders/$did/edit", $flat($bad4), ['X-CSRF-Token' => $AT])['ok'] ?? true) === false && stock('GC301') === $gcStock0 - 2);
+$rm = $edit; $rm['items'] = [0 => $edit['items'][0] + [], 1 => ['item_id' => (int)DB::val('SELECT id FROM order_items WHERE order_id=? AND product_id=?', [$did, $gcId]), 'product_id' => $gcId, 'qty' => 0]]; unset($rm['items'][1]); // remove added line
+$j = $a->json('POST', "/admin/orders/$did/edit", $flat($rm), ['X-CSRF-Token' => $AT]);
+check('edit: removing a product returns its stock', ($j['ok'] ?? false) && (int)DB::val('SELECT COUNT(*) FROM order_items WHERE order_id=?', [$did]) === 1 && stock('GC301') === $gcStock0, $j);
+/* cancel */
+check('cancel without CSRF blocked', ($a->json('POST', "/admin/orders/$did/cancel", [])['ok'] ?? true) === false && DB::val('SELECT status FROM orders WHERE id=?', [$did]) !== 'cancelled');
+$j = $a->json('POST', "/admin/orders/$did/cancel", ['reason' => 'test cancel'], ['X-CSRF-Token' => $AT]);
+check('cancel: status saved as cancelled + badge returned', ($j['ok'] ?? false) && DB::val('SELECT status FROM orders WHERE id=?', [$did]) === 'cancelled' && str_contains($j['status_html'] ?? '', 'Cancelled'), $j);
+check('cancel: stock restored for the edited quantities', stock('SP201') === $st0 + 2, [stock('SP201'), $st0]);
+check('cancel: orders page now shows Cancelled with Edit/Cancel disabled', preg_match('/data-order="' . $did . '" data-status="cancelled".*?data-om="edit"[^>]*disabled/s', $a->get('/admin/orders')['b']) === 1);
+check('cancelled order cannot be edited', ($a->json('POST', "/admin/orders/$did/edit", $flat($edit), ['X-CSRF-Token' => $AT])['message'] ?? '') === 'Cancelled orders cannot be edited.');
+check('cancelling twice is refused', ($a->json('POST', "/admin/orders/$did/cancel", [], ['X-CSRF-Token' => $AT])['ok'] ?? true) === false);
+
+
+/* ================= NEW: tasks 1-6 regression tests ================= */
+use App\Services\{QrCode, SkuService, CompanyLogo, PdfInvoice, Xlsx};
+
+/* Task 2: quantity rules (server) */
+[$qc, $qH] = fresh();
+foreach (['0', '-3', '2.5', 'abc', ''] as $badQty) {
+    $j = $qc->json('POST', '/api/cart/add', ['product_id' => $FP, 'qty' => $badQty], $qH);
+    check("add to cart rejects qty '$badQty'", ($j['ok'] ?? true) === false);
+}
+check('rejected quantities store nothing', ($qc->json('GET', '/api/cart')['cart']['count'] ?? -1) === 0);
+$qc->json('POST', '/api/cart/add', ['product_id' => $FP, 'qty' => 2], $qH); $j = $qc->json('POST', '/api/cart/add', ['product_id' => $FP, 'qty' => 3], $qH);
+check('adding again increases (2 + 3 = 5), not overwrite', ($j['cart']['count'] ?? 0) === 5 && ($j['in_cart'] ?? 0) === 5);
+$stockFP = (int)DB::val('SELECT stock FROM products WHERE id=?', [$FP]); $j = $qc->json('POST', '/api/cart/add', ['product_id' => $FP, 'qty' => $stockFP + 100], $qH);
+check('quantity is capped at available stock', ($j['cart']['count'] ?? 0) <= $stockFP);
+check('cart update with 0 or decimals is refused', ($qc->json('POST', '/api/cart/update', ['product_id' => $FP, 'qty' => 0], $qH)['ok'] ?? true) === false && ($qc->json('POST', '/api/cart/update', ['product_id' => $FP, 'qty' => '1.5'], $qH)['ok'] ?? true) === false);
+$qc->json('POST', '/api/cart/update', ['product_id' => $FP, 'qty' => 4], $qH); $cj = $qc->json('GET', '/api/cart')['cart'];
+check('badge count == stored quantity == line quantity', $cj['count'] === 4 && $cj['items'][0]['qty'] === 4 && abs($cj['items'][0]['line_total'] - 4 * $cj['items'][0]['unit_price']) < 0.01);
+$card = $qc->get('/products')['b'];
+check('product card quantity box is a whole-number control', str_contains($card, 'data-qty') && str_contains($card, 'step="1"'));
+
+/* Task 1: checkout */
+$min0 = \App\Models\Setting::get('min_order_amount', '0'); \App\Models\Setting::set('min_order_amount', '5000');
+[$kc, $kH] = fresh(); $kc->json('POST', '/api/cart/add', ['product_id' => $GC, 'qty' => 1], $kH);
+$kpage = $kc->get('/checkout')['b']; preg_match('/name="checkout_token" value="([a-f0-9]+)"/', $kpage, $kt);
+$kform = ['_csrf' => formCsrf($kpage), 'checkout_token' => $kt[1] ?? '', 'customer_name' => 'Ravi Kumar', 'mobile' => '09876543210', 'email' => '', 'address' => '12 Main Street', 'pincode' => '600040', 'city' => 'Chennai', 'state' => 'Tamil Nadu', 'payment_method' => 'cod', 'ack_age' => '1', 'ack_safety' => '1', 'ack_terms' => '1'];
+$r = $kc->post('/checkout', $kform);
+check('below-minimum order is explained (how much is missing) and not placed', str_contains($r['b'], 'Minimum order amount is') && str_contains($r['b'], 'more to place your order') && !str_contains($r['b'], 'Order confirmed'));
+check('checkout page shows the minimum-order notice up front', str_contains($kc->get('/checkout')['b'], 'id="min-order"'));
+\App\Models\Setting::set('min_order_amount', '0');
+$ordersBefore = (int)DB::val('SELECT COUNT(*) FROM orders'); $stockGC = (int)DB::val('SELECT stock FROM products WHERE id=?', [$GC]);
+$r = $kc->post('/checkout', $kform);
+check('required-only form (no email/landmark/notes, mobile 0-prefixed) places the order', str_contains($r['b'], 'Order confirmed') && (int)DB::val('SELECT COUNT(*) FROM orders') === $ordersBefore + 1);
+check('confirmed page shows items, address and the invoice button', str_contains($r['b'], '12 Main Street') && str_contains($r['b'], 'Download Invoice'));
+check('stock reduced and cart cleared', (int)DB::val('SELECT stock FROM products WHERE id=?', [$GC]) === $stockGC - 1 && ($kc->json('GET', '/api/cart')['cart']['count'] ?? -1) === 0);
+preg_match('/ref=(FC-[A-Z0-9-]+)/', $r['u'], $rm); $kref = $rm[1] ?? '';
+$inv = $kc->get('/order-invoice?ref=' . urlencode($kref)); check('customer can download the invoice PDF of their own order', $inv['s'] === 200 && str_starts_with($inv['b'], '%PDF'));
+check('a stranger cannot download that invoice', (new Http($BASE))->get('/order-invoice?ref=' . urlencode($kref))['b'] !== '' && !str_starts_with((new Http($BASE))->get('/order-invoice?ref=' . urlencode($kref))['b'], '%PDF'));
+$r2 = $kc->post('/checkout', $kform); check('double submit does not create a second order', (int)DB::val('SELECT COUNT(*) FROM orders') === $ordersBefore + 1);
+// stock drops after the cart was built: nothing is silently reduced, customer reviews the cart
+[$sc, $sH] = fresh(); DB::exec('UPDATE products SET stock=10 WHERE id=?', [$GC]); $sc->json('POST', '/api/cart/add', ['product_id' => $GC, 'qty' => 5], $sH);
+$sp = $sc->get('/checkout')['b']; preg_match('/name="checkout_token" value="([a-f0-9]+)"/', $sp, $st2); DB::exec('UPDATE products SET stock=2 WHERE id=?', [$GC]); $n0 = (int)DB::val('SELECT COUNT(*) FROM orders');
+$r = $sc->post('/checkout', ['_csrf' => formCsrf($sp), 'checkout_token' => $st2[1] ?? ''] + $kform);
+check('stock re-checked: no order is placed for fewer items than the customer saw', (int)DB::val('SELECT COUNT(*) FROM orders') === $n0 && str_contains($r['b'], 'reduced to available stock'));
+DB::exec('UPDATE products SET stock=100 WHERE id=?', [$GC]);
+
+/* Task 3: Excel export */
+check('anonymous cannot download the orders Excel', !str_contains((new Http($BASE))->get('/admin/orders/export-excel')['b'], 'PK'));
+$x = $a->get('/admin/orders/export-excel');
+check('admin gets a real .xlsx (zip container)', $x['s'] === 200 && str_starts_with($x['b'], 'PK'));
+$tmpx = sys_get_temp_dir() . '/fc-orders-' . getmypid() . '.xlsx'; file_put_contents($tmpx, $x['b']); $zx = new ZipArchive(); $zx->open($tmpx);
+$sheetXml = (string)$zx->getFromName('xl/worksheets/sheet1.xml');
+foreach (['Order No', 'Customer Name', 'Landmark', 'Items', 'Subtotal', 'Discount', 'Payment Status', 'Order Status', 'Notes'] as $colName) check("Excel has column $colName", str_contains($sheetXml, $colName));
+check('Excel header is bold and amounts are numbers', str_contains((string)$zx->getFromName('xl/styles.xml'), 'numFmtId="4"') && str_contains($sheetXml, '<cols>'));
+$zx->close(); @unlink($tmpx);
+check('Excel respects filters (no match -> header only)', (function () use ($a) { $b = $a->get('/admin/orders/export-excel?q=zzzz-no-such-order')['b']; $t = sys_get_temp_dir() . '/fc-f-' . getmypid() . '.xlsx'; file_put_contents($t, $b); $z = new ZipArchive(); $z->open($t); $xml = (string)$z->getFromName('xl/worksheets/sheet1.xml'); $z->close(); @unlink($t); return substr_count($xml, '<row ') === 1; })());
+
+/* Task 4: automatic SKU + selling price */
+check('SkuService: next SKU follows the existing scheme', SkuService::peek(1) === 'FP' . (max(103, (int)substr((string)DB::val("SELECT MAX(sku) FROM products WHERE sku REGEXP '^FP[0-9]+$'"), 2)) + 1));
+$pf2 = ['_csrf' => $AT, 'name' => 'Parallel A', 'category_id' => '2', 'original_price' => '150', 'stock' => '5', 'low_stock_threshold' => '10', 'status' => 'active'];
+$a->post('/admin/products/save', $pf2); $a->post('/admin/products/save', ['name' => 'Parallel B'] + $pf2);
+$skus = array_column(DB::all("SELECT sku FROM products WHERE name LIKE 'Parallel %' ORDER BY id"), 'sku');
+check('two creates in the same category get different SKUs with the right prefix', count($skus) === 2 && $skus[0] !== $skus[1] && str_starts_with($skus[0], 'SP2') && str_starts_with($skus[1], 'SP2'));
+check('existing SKUs are untouched', (int)DB::val("SELECT COUNT(*) FROM products WHERE sku IN ('FP101','SP201','GC301','GB801')") >= 3);
+$pid2 = (int)DB::val("SELECT id FROM products WHERE name='Parallel A'"); $skuA = $skus[0];
+$a->post('/admin/products/save', ['id' => $pid2, 'sku' => 'ZZ999', 'category_id' => '3', 'original_price' => '300'] + $pf2);
+check('SKU never changes on edit; price recalculated from MRP', DB::val('SELECT sku FROM products WHERE id=?', [$pid2]) === $skuA && (float)DB::val('SELECT selling_price FROM products WHERE id=?', [$pid2]) === round(300 - round(300 * (float)DB::val("SELECT setting_value FROM site_settings WHERE setting_key='company_discount_percent'") / 100, 2), 2));
+check('edit page shows the SKU read-only', str_contains($a->get("/admin/products/$pid2/edit")['b'], 'readonly') && str_contains($a->get("/admin/products/$pid2/edit")['b'], $skuA));
+check('MRP must be greater than 0', str_contains($a->post('/admin/products/save', ['original_price' => '0', 'name' => 'Zero'] + $pf2)['b'], 'valid original price'));
+check('form shows a live read-only selling price preview', str_contains($a->get('/admin/products/create')['b'], 'id="sp-amount"'));
+
+/* Task 5: company logo, UPI ID, default discount */
+$ct = formCsrf($a->get('/admin/company')['b']);
+$badUpi = $a->post('/admin/company', ['_csrf' => $ct, 'company_upi_id' => 'not valid']); check('invalid UPI ID is rejected', str_contains($badUpi['b'], 'UPI ID is not valid') && DB::val("SELECT setting_value FROM site_settings WHERE setting_key='company_upi_id'") !== 'not valid');
+$a->post('/admin/company', ['_csrf' => formCsrf($a->get('/admin/company')['b']), 'company_upi_id' => 'shop.name@okhdfcbank', 'company_discount_percent' => '50']);
+check('valid UPI ID and default discount saved', DB::val("SELECT setting_value FROM site_settings WHERE setting_key='company_upi_id'") === 'shop.name@okhdfcbank' && (float)DB::val("SELECT setting_value FROM site_settings WHERE setting_key='company_discount_percent'") === 50.0);
+check('discount above 90 is rejected', str_contains($a->post('/admin/company', ['_csrf' => formCsrf($a->get('/admin/company')['b']), 'company_discount_percent' => '95'])['b'], 'cannot exceed 90'));
+$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+$up = CompanyLogo::storeBytes($png); check('PNG logo accepted and stored under a random name', $up['ok'] && preg_match('#^uploads/company/[a-f0-9]{32}\.png$#', (string)$up['path']) && is_file(PUBLIC_PATH . '/' . $up['path']));
+check('script disguised as an image is rejected', CompanyLogo::storeBytes("<?php system('id');")['ok'] === false);
+check('SVG scripts and handlers are stripped', (function () { $c = CompanyLogo::sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg" onload="x()"><script>alert(1)</script><rect width="1" height="1"/></svg>'); return $c !== null && !preg_match('/script|onload/i', $c); })());
+check('SVG with ENTITY tricks is rejected', CompanyLogo::sanitizeSvg('<!DOCTYPE svg [<!ENTITY a "b">]><svg xmlns="http://www.w3.org/2000/svg"/>') === null);
+$ctl = formCsrf($a->get('/admin/company')['b']); $lp = sys_get_temp_dir() . '/fc-logo-' . getmypid() . '.png'; file_put_contents($lp, $png);
+$a->post('/admin/company', ['_csrf' => $ctl, 'company_logo' => new CURLFile($lp, 'image/png', 'logo.png')]); $logo1 = (string)DB::val("SELECT setting_value FROM site_settings WHERE setting_key='company_logo_path'");
+check('logo upload via the Company page saves the path and shows in the site header', $logo1 !== '' && str_contains((new Http($BASE))->get('/')['b'], $logo1));
+$a->post('/admin/company', ['_csrf' => formCsrf($a->get('/admin/company')['b']), 'company_logo' => new CURLFile($lp, 'image/png', 'logo2.png')]); $logo2 = (string)DB::val("SELECT setting_value FROM site_settings WHERE setting_key='company_logo_path'");
+check('replacing the logo deletes the old file', $logo2 !== '' && $logo2 !== $logo1 && !is_file(PUBLIC_PATH . '/' . $logo1) && is_file(PUBLIC_PATH . '/' . $logo2));
+check('admin header uses the logo', str_contains($a->get('/admin')['b'], $logo2));
+DB::exec('UPDATE products SET selling_price=original_price, discount_percent=0');
+$a->post('/admin/company/apply-discount', ['_csrf' => formCsrf($a->get('/admin/company')['b'])]);
+check('"Apply discount to all products" does nothing without confirmation', (int)DB::val('SELECT COUNT(*) FROM products WHERE discount_percent<>0') === 0);
+$a->post('/admin/company/apply-discount', ['_csrf' => formCsrf($a->get('/admin/company')['b']), 'confirm' => '1']);
+check('with confirmation every product is re-priced to the default discount', (int)DB::val('SELECT COUNT(*) FROM products WHERE discount_percent<>50') === 0 && (float)DB::val('SELECT selling_price FROM products WHERE id=?', [$FP]) === round((float)DB::val('SELECT original_price FROM products WHERE id=?', [$FP]) / 2, 2));
+
+/* Task 6: invoice QR / PAID / logo */
+$qr = QrCode::encode('upi://pay?pa=shop.name@okhdfcbank&pn=Sri%20Murugan%20Crackers&am=161.00&cu=INR&tn=Order%20FC-AAAAA-BBBBB');
+check('QR encoder produces a valid-size symbol', $qr->size() === $qr->version() * 4 + 17 && $qr->version() >= 5 && $qr->isDark(0, 0) && $qr->isDark(6, 0) && !$qr->isDark(7, 0));
+check('UPI deep link format', PdfInvoice::upiLink('a.b@okaxis', 'Sri Murugan Crackers', 4800, 'FC-X-Y') === 'upi://pay?pa=a.b@okaxis&pn=Sri%20Murugan%20Crackers&am=4800.00&cu=INR&tn=Order%20FC-X-Y');
+$oid = (int)DB::val("SELECT id FROM orders WHERE payment_status='pending' AND status<>'cancelled' ORDER BY id DESC LIMIT 1");
+$pdfPending = $a->get("/admin/orders/$oid/pdf")['b']; check('invoice for an unpaid order is a PDF containing the QR section', str_starts_with($pdfPending, '%PDF') && str_contains($pdfPending, ' re '));
+DB::exec("UPDATE orders SET payment_status='paid' WHERE id=?", [$oid]); $pdfPaid = $a->get("/admin/orders/$oid/pdf")['b'];
+check('paid order: PAID stamp, no QR', str_contains($pdfPaid, 'PAID') && !str_contains($pdfPaid, 'SCAN TO PAY') && str_contains($pdfPending, 'SCAN TO PAY'));
+DB::exec("UPDATE orders SET payment_status='pending' WHERE id=?", [$oid]); \App\Models\Setting::set('company_upi_id', '');
+check('empty UPI ID: invoice still generated, QR hidden', str_starts_with($a->get("/admin/orders/$oid/pdf")['b'], '%PDF') && !str_contains($a->get("/admin/orders/$oid/pdf")['b'], 'SCAN TO PAY'));
+CompanyLogo::delete($logo2); \App\Models\Setting::set('company_logo_path', ''); @unlink($lp);
+
 /* logout + rate limit */
 $a->post('/admin/logout', ['_csrf' => $AT]); check('logout works', str_contains($a->get('/admin/orders')['b'], 'Admin sign in'));
 $rl = new Http($BASE); $lt = formCsrf($rl->get('/admin/login')['b']); $last = '';

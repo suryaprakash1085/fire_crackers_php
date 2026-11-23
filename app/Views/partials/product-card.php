@@ -12,7 +12,7 @@
     <div class="mt-2.5 flex items-baseline gap-2 flex-wrap"><span class="text-xl font-bold font-display" style="color:var(--c-primary)"><?= money($p['selling_price']) ?></span><?php if ($disc > 0): ?><s class="text-xs muted"><?= money($p['original_price']) ?></s><?php endif; ?><span class="badge ml-auto <?= $sc ?>"><?= e($sl) ?></span></div>
     <?php if ($save > 0): ?><div class="mt-1.5"><span class="save-pill"><?= icon('badge-percent', 'w-3 h-3') ?>You save <?= money($save) ?></span></div><?php endif; ?>
     <div class="mt-3.5 flex flex-col min-[430px]:flex-row min-[430px]:items-center gap-2 mt-auto pt-1">
-      <?php if (!$out): ?><div class="qty qty-sm self-start min-[430px]:self-auto"><button type="button" data-step="-1" aria-label="Decrease quantity">−</button><input type="number" value="1" min="1" max="<?= (int)$p['stock'] ?>" aria-label="Quantity"><button type="button" data-step="1" aria-label="Increase quantity">+</button></div><?php endif; ?>
+      <?php if (!$out): ?><div class="qty qty-sm self-start min-[430px]:self-auto"><button type="button" data-step="-1" aria-label="Decrease quantity">−</button><input type="number" value="1" min="1" max="<?= min((int)$p['stock'], max(1, (int)setting('max_qty_per_item', 500))) ?>" step="1" inputmode="numeric" data-qty aria-label="Quantity"><button type="button" data-step="1" aria-label="Increase quantity">+</button></div><?php endif; ?>
       <button type="button" data-add="<?= (int)$p['id'] ?>" class="btn btn-primary w-full min-[430px]:flex-1 !px-3 !min-h-[38px] btn-sm" <?= $out ? 'disabled' : '' ?>><?= icon('shopping-cart', 'w-4 h-4') ?><span><?= $out ? 'Sold out' : 'Add to cart' ?></span></button>
     </div>
   </div>

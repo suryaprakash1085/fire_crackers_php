@@ -23,7 +23,7 @@ final class CartService {
         if ($source === 'voice_order' && $added > 0) $_SESSION['voice_total'][$id] = ($_SESSION['voice_total'][$id] ?? 0) + $added;
         $r = ['ok' => true, 'added' => $added, 'name' => $p['name'], 'limit' => $limit, 'in_cart' => $new];
         if ($added < $qty) return $r + ['status' => 'reduced', 'message' => "Only $limit of {$p['name']} available — cart updated to $new."];
-        return $r + ['status' => 'added', 'message' => "Added $added × {$p['name']}."];
+        return $r + ['status' => 'added', 'message' => "Added $added × {$p['name']}." . ($have > 0 ? " Now $new in your cart." : '')];
     }
     /** Take back quantities previously added by a voice command. */
     public static function undoVoice(array $added): void {
@@ -34,13 +34,33 @@ final class CartService {
         }
         if (!self::raw()) self::clear();
     }
-    public static function set(int $id, int $qty): array {
-        if ($qty <= 0) { self::remove($id); return ['ok' => true, 'message' => 'Removed.']; }
-        $p = DB::one('SELECT name,stock,status FROM products WHERE id=?', [$id]);
-        if (!$p || $p['status'] !== 'active') { self::remove($id); return ['ok' => false, 'message' => 'Product no longer available.']; }
+    /** SET (not add): the cart quantity of this product becomes exactly $qty (0 = remove), limited by stock and the per-item maximum.
+     *  Returns ok, status (set | reduced | removed | out_of_stock | unavailable), message, name, limit, in_cart. */
+    public static function set(int $id, int $qty, string $source = 'cart'): array {
+        if ($qty <= 0) { self::remove($id); return ['ok' => true, 'status' => 'removed', 'message' => 'Removed.', 'in_cart' => 0]; }
+        $p = DB::one('SELECT p.name,p.stock,p.status FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=? AND c.is_active=1', [$id]);
+        if (!$p || $p['status'] !== 'active') { self::remove($id); return ['ok' => false, 'status' => 'unavailable', 'message' => 'Product no longer available.', 'in_cart' => 0]; }
         $limit = min(max(1, (int)setting('max_qty_per_item', 500)), (int)$p['stock']);
-        $_SESSION['cart'][$id] = max(1, min($qty, max(1, $limit)));
-        return ['ok' => true, 'message' => $qty > $limit ? "Only $limit available." : 'Updated.'];
+        if ($limit <= 0) { self::remove($id); return ['ok' => false, 'status' => 'out_of_stock', 'message' => $p['name'] . ' is out of stock.', 'name' => $p['name'], 'limit' => 0, 'in_cart' => 0]; }
+        $new = min($qty, $limit);
+        $_SESSION['cart'][$id] = $new;
+        if ($source === 'quick_order') $_SESSION['cart_sources']['quick_order'] = true;
+        return ['ok' => true, 'status' => $qty > $limit ? 'reduced' : 'set', 'message' => $qty > $limit ? "Only $limit available." : 'Updated.', 'name' => $p['name'], 'limit' => $limit, 'in_cart' => $new];
+    }
+    /** Quick Order bulk SET. $lines = [productId => wantedQty]. Every line is validated; one bad line never blocks the others.
+     *  Returns ['changed' => number of products whose cart quantity really changed, 'results' => per-line status]. */
+    public static function setMany(array $lines, string $source = 'quick_order'): array {
+        $results = []; $changed = 0;
+        foreach ($lines as $id => $qty) {
+            $id = (int)$id; $qty = max(0, (int)$qty); $before = (int)(self::raw()[$id] ?? 0);
+            $r = self::set($id, $qty, $source);
+            $after = (int)(self::raw()[$id] ?? 0);
+            if ($after !== $before) $changed++;
+            $status = (string)($r['status'] ?? ($r['ok'] ? 'set' : 'unavailable'));
+            if (in_array($status, ['set', 'removed'], true) && $after === $before) $status = 'unchanged';
+            $results[] = ['id' => $id, 'name' => (string)($r['name'] ?? ''), 'requested' => $qty, 'in_cart' => $after, 'status' => $status, 'message' => (string)($r['message'] ?? '')];
+        }
+        return ['changed' => $changed, 'results' => $results];
     }
     public static function remove(int $id): void { unset($_SESSION['cart'][$id], $_SESSION['voice_total'][$id]); if (!self::raw()) self::clear(); }
     public static function clear(): void { unset($_SESSION['cart'], $_SESSION['cart_sources'], $_SESSION['voice_total'], $_SESSION['voice_last']); }
@@ -56,7 +76,7 @@ final class CartService {
         if ($raw) {
             $ids = array_map('intval', array_keys($raw));
             $in = implode(',', array_fill(0, count($ids), '?'));
-            $rows = DB::all("SELECT p.id,p.sku,p.name,p.original_price,p.selling_price,p.stock,p.status,
+            $rows = DB::all("SELECT p.id,p.sku,p.name,p.original_price," . discount_sql() . " AS selling_price,p.stock,p.status,
                 (SELECT path FROM product_images i WHERE i.product_id=p.id ORDER BY i.is_primary DESC, i.sort_order, i.id LIMIT 1) AS image
                 FROM products p WHERE p.id IN ($in)", $ids);
             $by = array_column($rows, null, 'id');

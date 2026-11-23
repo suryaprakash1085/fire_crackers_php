@@ -42,7 +42,7 @@ final class ProductSheet {
         if ($withProducts) {
             $where = $includeArchived ? '' : "WHERE p.status<>'archived'";
             foreach (DB::all("SELECT p.*, c.name category_name FROM products p JOIN categories c ON c.id=p.category_id $where ORDER BY c.name, p.name") as $p) {
-                $rows[] = [(int)$p['id'], (string)$p['sku'], $p['name'], $p['name_ta'], $p['category_name'], (float)$p['original_price'], (float)$p['selling_price'], (int)$p['stock'], (int)$p['stock'], (int)$p['low_stock_threshold'],
+                $rows[] = [(int)$p['id'], (string)$p['sku'], $p['name'], $p['name_ta'], $p['category_name'], (float)$p['original_price'], discounted_price($p['original_price']), (int)$p['stock'], (int)$p['stock'], (int)$p['low_stock_threshold'],
                     $p['status'], $p['is_featured'] ? 'Yes' : 'No', $p['is_popular'] ? 'Yes' : 'No', $p['description'], $p['safety_notes'], $p['aliases']];
             }
         }
@@ -278,19 +278,14 @@ final class ProductSheet {
             // prices
             if (!$bad) {
                 $o = ($d['original_price'] ?? '') !== '' ? self::num($d['original_price']) : null;
-                $s = ($d['selling_price'] ?? '') !== '' ? self::num($d['selling_price']) : null;
                 if (($d['original_price'] ?? '') !== '' && $o === null) $bad = 'Original Price is not a valid number.';
-                elseif (($d['selling_price'] ?? '') !== '' && $s === null) $bad = 'Selling Price is not a valid number.';
                 else {
                     $o = $o ?? ($cur ? (float)$cur['original_price'] : null);
-                    $s = $s ?? ($cur ? (float)$cur['selling_price'] : null);
-                    if ($o === null || $s === null) $bad = 'Original Price and Selling Price are required for a new product.';
+                    if ($o === null) $bad = 'Original Price is required for a new product (Selling Price is calculated automatically from the company discount).';
                     elseif ($o <= 0 || $o > 9999999) $bad = 'Original Price must be above 0.';
-                    elseif ($s <= 0 || $s > $o) $bad = 'Selling Price must be above 0 and not more than the Original Price.';
                     else {
                         $new['original_price'] = round($o, 2);
-                        $new['selling_price'] = round($s, 2);
-                        $new['discount_percent'] = round(($o - $s) / $o * 100, 2);
+                        if (!$cur) { $new['selling_price'] = discounted_price($o); $new['discount_percent'] = company_discount(); }
                     }
                 }
             }

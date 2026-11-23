@@ -18,7 +18,7 @@ final class ProductUploadStash {
         }
     }
 
-    /** @return array{images:array<array{path:string,name:string}>,video:?array{path:string,name:string}} */
+    /** @return array{images:array<array{path:string,name:string,file:string}>,video:?array{path:string,name:string}} */
     public static function get(?string $token): array {
         self::prune();
         $empty = ['images' => [], 'video' => null];
@@ -29,7 +29,7 @@ final class ProductUploadStash {
         $files = [];
         foreach (($entry['images'] ?? []) as $image) {
             $file = self::resolve($dir, $image);
-            if ($file) $files['images'][] = ['path' => $file, 'name' => (string)$image['name']];
+            if ($file) $files['images'][] = ['path' => $file, 'name' => (string)$image['name'], 'file' => basename($file)];
         }
         $video = self::resolve($dir, $entry['video'] ?? null);
         return ['images' => $files['images'] ?? [], 'video' => $video ? ['path' => $video, 'name' => (string)$entry['video']['name']] : null];
@@ -59,7 +59,7 @@ final class ProductUploadStash {
 
         foreach ($images as $image) {
             if (($image['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) continue;
-            $stored = self::store($image, $dir, 6 * 1024 * 1024, 'Image');
+            $stored = self::store($image, $dir, MediaService::MAX_BYTES, 'Image');
             if ($stored) $entry['images'][] = $stored;
             else $errors[] = self::lastError();
         }
@@ -74,6 +74,17 @@ final class ProductUploadStash {
         @touch($dir);
         $_SESSION['product_upload_stash'][$token] = $entry;
         return ['token' => $token, 'errors' => $errors];
+    }
+
+    /** Forget some kept images (the admin ticked "Remove" next to them). $files = stored file ids as returned by get()['images'][]['file']. */
+    public static function drop(?string $token, array $files): void {
+        if (!$token || !preg_match('/^[a-f0-9]{32}$/', $token) || !$files || empty($_SESSION['product_upload_stash'][$token]['images'])) return;
+        $dir = self::DIR . '/' . $token; $keep = [];
+        foreach ($_SESSION['product_upload_stash'][$token]['images'] as $image) {
+            if (in_array((string)($image['file'] ?? ''), array_map('strval', $files), true)) { if ($f = self::resolve($dir, $image)) @unlink($f); }
+            else $keep[] = $image;
+        }
+        $_SESSION['product_upload_stash'][$token]['images'] = $keep;
     }
 
     public static function clear(?string $token): void {
@@ -91,18 +102,20 @@ final class ProductUploadStash {
     private static string $error = '';
 
     private static function store(array $upload, string $dir, int $maxBytes, string $kind): ?array {
-        $err = (int)($upload['error'] ?? UPLOAD_ERR_NO_FILE);
-        if ($err !== UPLOAD_ERR_OK) {
-            self::$error = $kind . ' upload failed' . ($err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE ? ' (file too large).' : '.');
-            return null;
-        }
-        $tmp = (string)($upload['tmp_name'] ?? '');
-        if ($tmp === '' || !is_uploaded_file($tmp)) { self::$error = $kind . ' upload was invalid.'; return null; }
-        $size = @filesize($tmp);
-        if ($size === false || $size > $maxBytes) { self::$error = $kind . ' exceeds the upload size limit.'; return null; }
         $name = trim((string)($upload['name'] ?? ''));
+        $who = $name !== '' ? $name . ': ' : '';
+        $err = (int)($upload['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($err !== UPLOAD_ERR_OK) { self::$error = $who . MediaService::uploadErrorMessage($err, $kind); return null; }
+        $tmp = (string)($upload['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) { self::$error = $who . $kind . ' upload was invalid.'; return null; }
+        $size = @filesize($tmp);
+        if ($size === false || $size > $maxBytes) { self::$error = $who . $kind . ' is ' . MediaService::humanSize((int)$size) . ' – the limit is ' . MediaService::humanSize($maxBytes) . '.'; return null; }
+        if ($kind === 'Image') {   // look at the real content NOW, so a wrong file is reported on the form and never kept
+            $chk = MediaService::inspect((string)@file_get_contents($tmp));
+            if (!$chk['ok']) { self::$error = $who . $chk['message']; return null; }
+        }
         $stored = ['file' => bin2hex(random_bytes(12)) . '.tmp', 'name' => mb_substr($name ?: strtolower($kind), 0, 180)];
-        if (!@move_uploaded_file($tmp, $dir . '/' . $stored['file'])) { self::$error = 'Could not preserve ' . strtolower($kind) . ' upload.'; return null; }
+        if (!@move_uploaded_file($tmp, $dir . '/' . $stored['file'])) { self::$error = $who . 'Could not preserve ' . strtolower($kind) . ' upload.'; return null; }
         return $stored;
     }
 
