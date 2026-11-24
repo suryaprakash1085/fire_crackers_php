@@ -1,0 +1,26 @@
+/* Admin popups (create / edit / view / delete-confirm). Light + dark admin themes, responsive. */
+.am-modal[hidden],.am-confirm[hidden]{display:none}
+.am-modal,.am-confirm{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:1rem}
+.am-confirm{z-index:110}
+.am-backdrop{position:absolute;inset:0;background:rgb(10 14 28/.6);backdrop-filter:blur(2px)}
+.am-dialog{position:relative;background:#F5F7FA;color:#1f2937;border-radius:1rem;box-shadow:0 24px 70px rgb(0 0 0/.4);width:100%;max-width:760px;max-height:calc(100vh - 2rem);display:flex;flex-direction:column;overflow:hidden;animation:amIn .16s ease-out}
+.am-dialog.am-lg{max-width:1180px}.am-dialog.am-sm{max-width:440px}
+@keyframes amIn{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+.am-dialog>header{display:flex;align-items:center;gap:.6rem;padding:.85rem 1.1rem;border-bottom:1px solid rgb(0 0 0/.08);background:#fff}
+.am-dialog>header h3{font-weight:700;font-size:1.05rem;flex:1;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-x{width:36px;height:36px;border-radius:.6rem;border:0;background:transparent;font-size:1.6rem;line-height:1;cursor:pointer;color:inherit}.am-x:hover{background:rgb(0 0 0/.07)}
+.am-body{padding:1.1rem;overflow:auto;flex:1;-webkit-overflow-scrolling:touch}
+.am-loading,.am-empty{padding:3rem 1rem;text-align:center;color:#667085}
+.am-busy{opacity:.65;pointer-events:none}
+.am-confirm .am-dialog{max-width:420px;background:#fff}
+.am-confirm .am-body{padding:1.2rem 1.3rem 0}
+.am-confirm h3{font-weight:700;font-size:1.05rem;margin:0 0 .4rem}
+.am-confirm p{margin:0;color:#667085;font-size:.9rem;line-height:1.5}
+.am-confirm .am-foot{display:flex;gap:.5rem;justify-content:flex-end;padding:1.1rem 1.3rem 1.2rem}
+/* dark admin theme */
+html.dark .am-dialog{background:#0B1020;color:#E5E7EB;box-shadow:0 24px 70px rgb(0 0 0/.7),0 0 0 1px rgb(255 255 255/.08)}
+html.dark .am-dialog>header{background:#121A2E;border-bottom-color:rgb(255 255 255/.09)}
+html.dark .am-x:hover{background:rgb(255 255 255/.09)}
+html.dark .am-confirm .am-dialog{background:#121A2E}
+html.dark .am-confirm p{color:rgb(229 231 235/.7)}
+@media(max-width:640px){.am-modal{padding:0;align-items:flex-end}.am-dialog,.am-dialog.am-lg{max-width:100%;max-height:94vh;border-radius:1rem 1rem 0 0}.am-confirm{align-items:center;padding:1rem}.am-confirm .am-dialog{border-radius:1rem}}

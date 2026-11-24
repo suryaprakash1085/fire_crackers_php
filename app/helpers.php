@@ -23,6 +23,8 @@ function money($n): string { return '₹' . number_format((float)$n, 2); }
 function setting(string $key, $default = '') { return Setting::get($key, $default); }
 function now(): string { return date('Y-m-d H:i:s'); }
 function redirect(string $to): never { header('Location: ' . (preg_match('#^https?://#', $to) ? $to : url($to))); exit; }
+/** True when the admin page is being loaded into a popup (admin-modal.js sends X-Modal: 1): the layout then returns only the content. */
+function is_modal(): bool { return ($_SERVER['HTTP_X_MODAL'] ?? '') === '1'; }
 function is_post(): bool { return ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'; }
 function slugify(string $s): string { $s = strtolower(trim(preg_replace('/[^A-Za-z0-9]+/', '-', $s), '-')); return $s !== '' ? $s : 'item'; }
 function log_error(string $m): void {

@@ -3,7 +3,8 @@ use App\Controllers\{HomeController, PageController, ProductController, ApiContr
 use App\Controllers\Admin\{AuthController, DashboardController, ProductsController, CrudController, OrdersController, EnquiriesController, ContentController, SettingsController, AdminUsersController, ReportsController, CompanyController, PriceListController};
 
 $r = $router;
-$r->get('/', [HomeController::class, 'index']);
+$r->get('/', [ShopController::class, 'quickOrder']);        // the site's first page is Quick Order
+$r->get('/home', [HomeController::class, 'index']);         // the old home page, still reachable
 $r->get('/about', [PageController::class, 'about']);
 $r->get('/services', [PageController::class, 'services']);
 $r->get('/products', [ProductController::class, 'index']);

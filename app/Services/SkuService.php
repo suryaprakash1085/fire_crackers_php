@@ -14,6 +14,20 @@ use App\Core\DB;
  *   The UNIQUE indexes on products.sku and categories.sku_prefix remain as the final safety net.
  */
 final class SkuService {
+    /** Makes sure categories.sku_prefix / sku_block (migration 006) exist. If that migration was never run on this server the product form
+     *  and every "Add product" failed with "Could not save the product". Runs ALTER TABLE (an implicit commit), so call it BEFORE beginTransaction(). */
+    public static function ensureSchema(): void {
+        static $done = false; if ($done) return; $done = true;
+        try {
+            $cols = array_column(DB::all("SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categories'"), 'c');
+            $cols = array_map('strtolower', $cols);
+            if (!in_array('sku_prefix', $cols, true)) DB::pdo()->exec('ALTER TABLE categories ADD COLUMN sku_prefix VARCHAR(8) NULL');
+            if (!in_array('sku_block', $cols, true)) DB::pdo()->exec('ALTER TABLE categories ADD COLUMN sku_block INT UNSIGNED NULL');
+            if (!(int)DB::val("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categories' AND INDEX_NAME = 'uq_cat_sku_prefix'"))
+                DB::pdo()->exec('ALTER TABLE categories ADD UNIQUE INDEX uq_cat_sku_prefix (sku_prefix)');
+        } catch (\Throwable $e) { log_error('sku schema: ' . $e->getMessage()); }
+    }
+
     /** Reserves and returns the next SKU for a category. Call inside an open transaction. */
     public static function next(int $categoryId): string {
         $cat = DB::one('SELECT id,name,sku_prefix,sku_block FROM categories WHERE id=? FOR UPDATE', [$categoryId]);

@@ -7,4 +7,4 @@
     <?php elseif ($type === 'datetime'): ?><input class="input <?= $er ? 'has-error' : '' ?>" type="datetime-local" id="<?= $k ?>" name="<?= $k ?>" value="<?= $val ? e(date('Y-m-d\TH:i', strtotime($val))) : '' ?>">
     <?php else: ?><input class="input <?= $er ? 'has-error' : '' ?>" type="<?= $type === 'number' ? 'number' : 'text' ?>" id="<?= $k ?>" name="<?= $k ?>" value="<?= e($val) ?>" <?= !empty($def['req']) ? 'required' : '' ?> <?= isset($def['max']) ? 'maxlength="' . $def['max'] . '"' : '' ?>><?php endif; ?>
     <?php if ($er): ?><p class="err"><?= e($er) ?></p><?php endif; ?></div><?php endif; ?>
-<?php endforeach; ?><div class="flex gap-2"><button class="btn btn-primary">Save</button><a class="btn btn-outline" href="<?= e(url("/admin/$e")) ?>">Cancel</a></div></form>
+<?php endforeach; ?><div class="flex gap-2"><button class="btn btn-primary">Save</button><?php if (is_modal()): ?><button type="button" class="btn btn-outline" data-am-close>Cancel</button><?php else: ?><a class="btn btn-outline" href="<?= e(url("/admin/$e")) ?>">Cancel</a><?php endif; ?></div></form>

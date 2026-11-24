@@ -183,6 +183,7 @@ final class ProductsController extends AdminController {
         }
         // Company-wide discount: original price is stored as entered; these two columns are only a cache (all reads recompute live).
         $d['selling_price'] = discounted_price($d['original_price']); $d['discount_percent'] = company_discount();
+        SkuService::ensureSchema();   // before the transaction: ALTER TABLE commits implicitly
         $pdo = DB::pdo();
         try {
             $pdo->beginTransaction();
@@ -227,7 +228,7 @@ final class ProductsController extends AdminController {
             if (($newVideo || $removeVideo) && $oldVideo !== '') MediaService::deleteVideo($oldVideo);
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
-            log_error('product save: ' . $e->getMessage()); flash('error', 'Could not save the product.');
+            log_error('product save: ' . get_class($e) . ': ' . $e->getMessage()); flash('error', $this->saveError($e));
             $retry = $requestedId ? "/admin/products/$requestedId/edit" : '/admin/products/create';
             if ($pendingToken) $retry .= '?pending_upload_token=' . rawurlencode($pendingToken);
             redirect($retry);
@@ -236,8 +237,20 @@ final class ProductsController extends AdminController {
         flash('success', 'Product saved.');
         redirect("/admin/products/$id");
     }
+    /** A short, clean message for the admin (the technical detail goes to storage/logs only). */
+    private function saveError(\Throwable $e): string {
+        if ($e instanceof \DomainException) return $e->getMessage();
+        if ($e instanceof \PDOException) {
+            $c = (string)$e->getCode();
+            if ($c === '23000') return 'This product could not be saved because the same product ID or name already exists. Please change the name and try again.';
+            if ($c === '22001' || $c === '22003') return 'One of the values is too long or too large. Please shorten it and try again.';
+            if ($c === '42S22' || $c === '42S02') return 'The database needs an update before products can be saved. Please contact your developer.';
+        }
+        return 'Could not save the product. Please try again.';
+    }
     /** category id => the SKU the next product of that category will get (a hint on the form; the real SKU is reserved on save). */
     private function skuPreview(array $cats): array {
+        SkuService::ensureSchema();
         $out = []; foreach ($cats as $c) { try { $out[(int)$c['id']] = SkuService::peek((int)$c['id']); } catch (\Throwable $e) { $out[(int)$c['id']] = ''; } }
         return $out;
     }

@@ -38,7 +38,7 @@ final class PriceList {
     public static function available(): bool {
         static $v = null;
         if ($v === null) {
-            try { $v = self::mode() === 'auto' ? self::hasProducts() : self::uploadedFile() !== null; } catch (\Throwable $e) { log_error('pricelist: ' . $e->getMessage()); $v = false; }
+            try { $v = self::mode() === 'auto' ? self::hasProducts() : (self::uploadedFile() !== null || self::hasProducts()); } catch (\Throwable $e) { log_error('pricelist: ' . $e->getMessage()); $v = false; }
         }
         return $v;
     }
@@ -86,10 +86,15 @@ final class PriceList {
     /** Sends the price list and stops the script. Returns false (nothing sent) when there is none.
      *  $inline = show in the browser (admin preview) instead of downloading; $mode = force 'uploaded' or 'auto' (admin preview), default = the saved mode. */
     public static function send(bool $inline = false, ?string $mode = null): bool {
-        $mode = in_array($mode, ['uploaded', 'auto'], true) ? $mode : self::mode(); $bin = null; $file = null;
+        $explicit = in_array($mode, ['uploaded', 'auto'], true); $mode = $explicit ? $mode : self::mode(); $bin = null; $file = null;
         try {
             if ($mode === 'auto') { if (!self::hasProducts()) return false; $bin = self::generate(); $len = strlen($bin); }
-            else { $file = self::uploadedFile(); if ($file === null) return false; $len = (int)filesize($file); }
+            else {
+                $file = self::uploadedFile();
+                if ($file === null && !$explicit && self::hasProducts()) { $bin = self::generate(); $len = strlen($bin); }   // nothing uploaded: fall back to the automatic price list
+                elseif ($file === null) return false;
+                else $len = (int)filesize($file);
+            }
         } catch (\Throwable $e) { log_error('pricelist: ' . $e->getMessage()); return false; }
         header('Content-Type: application/pdf'); header('Content-Length: ' . $len); header('X-Content-Type-Options: nosniff'); header('Cache-Control: private, no-cache');
         header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . self::downloadName() . '"');

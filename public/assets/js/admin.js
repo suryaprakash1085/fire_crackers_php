@@ -4,7 +4,6 @@
   window.lucide && lucide.createIcons();
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-side-toggle]')) { const sb = document.getElementById('sidebar'); sb.classList.toggle('-translate-x-full'); const sc = document.getElementById('side-scrim'); sc && sc.classList.toggle('hidden', sb.classList.contains('-translate-x-full')); }
-    const c = e.target.closest('[data-confirm]'); if (c && !confirm(c.dataset.confirm)) e.preventDefault();
   });
   /* ---- colour inputs: keep hex text and picker in sync, live preview ---- */
   document.querySelectorAll('[data-color]').forEach((w) => {

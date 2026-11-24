@@ -1,4 +1,10 @@
 <?php
+if (is_modal()) {   // popup request: only the title marker, the flash messages and the page content (no sidebar / header)
+    echo '<div hidden data-am-title="' . e($title ?? '') . '"></div>';
+    foreach (flashes() as [$t, $m]) echo '<div role="alert" data-type="' . e($t) . '" class="mb-4 rounded-xl px-4 py-3 text-sm font-medium border ' . ($t === 'success' ? 'bg-green-50 border-green-200 text-green-800' : ($t === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800')) . '">' . e($m) . '</div>';
+    echo $content;
+    return;
+}
 $role = $admin['role'] ?? 'staff'; $lvl = ['staff' => 1, 'admin' => 2, 'superadmin' => 3][$role];
 $path = '/' . trim(rawurldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)), '/'); if (base_path() !== '' && str_starts_with($path, base_path())) $path = substr($path, strlen(base_path()));
 $menu = [['/admin', 'Dashboard', 'layout-dashboard', 1], ['/admin/orders', 'Orders', 'receipt', 1], ['/admin/reports', 'Reports', 'chart-column', 1], ['/admin/products', 'Products', 'package', 2], ['/admin/price-list', 'Price List', 'file-down', 1], ['/admin/categories', 'Categories', 'tags', 2], ['/admin/banners', 'Banners', 'image', 2],
@@ -11,7 +17,7 @@ $active = fn($h) => $h === '/admin' ? in_array($path, ['/admin', '/admin/dashboa
 <?= tailwind_assets() ?>
 <style>:root{--c-primary:#E8590C;--c-primary-rgb:232 89 12;--c-secondary:#7048E8;--c-secondary-rgb:112 72 232;--c-accent:#F59F00;--c-accent-rgb:245 159 0;--c-text:#1F2937;--c-text-rgb:31 41 55;--c-bg:#F6F7FB;--c-button:#E8590C;--c-button-text:#fff}</style>
 <link rel="stylesheet" href="<?= e(asset('assets/css/app.css')) ?>"><link rel="stylesheet" href="<?= e(asset('assets/css/admin-dark.css')) ?>"><style>body{background:#F5F7FA}.table-x th{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#667085;text-align:left;padding:.7rem .85rem;background:#F9FAFB;white-space:nowrap;border-bottom:1px solid #eef0f4}.table-x td{padding:.7rem .85rem;border-top:1px solid #f0f2f6;vertical-align:middle}.table-x tbody tr:hover{background:#FCFCFD}.nav-link{position:relative}.nav-link.on::before{content:'';position:absolute;left:-12px;top:20%;bottom:20%;width:4px;border-radius:0 4px 4px 0;background:var(--c-primary)}</style>
-<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script><script src="<?= e(asset('assets/js/admin.js')) ?>" defer></script></head>
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script><link rel="stylesheet" href="<?= e(asset('assets/css/admin-modal.css')) ?>"><script src="<?= e(asset('assets/js/admin.js')) ?>" defer></script><script src="<?= e(asset('assets/js/admin-modal.js')) ?>" defer></script></head>
 <body class="min-h-screen">
 <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-black/5 flex flex-col -translate-x-full lg:translate-x-0 transition-transform">
   <div class="h-16 flex items-center gap-2 px-5 border-b border-black/5"><?php $adminLogo = company_logo_url(); if ($adminLogo): ?><img src="<?= e($adminLogo) ?>" alt="" class="w-9 h-9 rounded-xl object-contain bg-white shrink-0"><?php else: ?><span class="w-9 h-9 rounded-xl text-white flex items-center justify-center" style="background:linear-gradient(135deg,var(--c-primary),var(--c-accent))"><?= icon('sparkles', 'w-5 h-5') ?></span><?php endif; ?><div class="leading-tight min-w-0"><b class="font-display block truncate"><?= e(setting('brand_name')) ?></b><span class="text-[11px] muted">Admin Panel</span></div></div>
@@ -27,7 +33,7 @@ $active = fn($h) => $h === '/admin' ? in_array($path, ['/admin', '/admin/dashboa
       <form method="post" action="<?= e(url('/admin/logout')) ?>"><?= csrf_field() ?><button class="btn btn-outline btn-sm"><?= icon('log-out', 'w-4 h-4') ?> <span class="hidden sm:inline">Logout</span></button></form></div>
   </header>
   <main class="flex-1 p-4 lg:p-8 max-w-[1400px] w-full">
-    <?php foreach (flashes() as [$t, $m]): ?><div role="alert" class="mb-4 rounded-xl px-4 py-3 text-sm font-medium border <?= $t === 'success' ? 'bg-green-50 border-green-200 text-green-800' : ($t === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800') ?>"><?= e($m) ?></div><?php endforeach; ?>
+    <?php foreach (flashes() as [$t, $m]): ?><div role="alert" data-type="<?= e($t) ?>" class="mb-4 rounded-xl px-4 py-3 text-sm font-medium border <?= $t === 'success' ? 'bg-green-50 border-green-200 text-green-800' : ($t === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800') ?>"><?= e($m) ?></div><?php endforeach; ?>
     <?= $content ?>
   </main>
 </div>
