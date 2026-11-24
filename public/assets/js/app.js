@@ -125,6 +125,54 @@
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') FC.closeDrawer(); });
 
+  /* ---------- product-card quantity box: the number = quantity in the cart (0 = not in the cart); every change is saved automatically ---------- */
+  const A = { t: new Map(), n: new Map() };      // t: debounce timers, n: requests still running (per product)
+  const inCart = (id) => { const it = FC.cart && FC.cart.items.find((i) => +i.id === id); return it ? +it.qty : 0; };
+  const aClean = (inp) => { const max = Math.max(0, parseInt(inp.max, 10) || 0); let n = Math.floor(Number(String(inp.value).trim())); if (!Number.isFinite(n) || n < 0) n = 0; if (n > max) n = max; inp.value = n; return n; };
+  const aPaint = (id) => {
+    if (A.t.has(id) || A.n.get(id)) return;        // the shopper is still typing / a request is running: do not overwrite the box
+    document.querySelectorAll('input[data-aqty="' + id + '"]').forEach((i) => { i.value = inCart(id); i.closest('.qty').classList.toggle('in-cart', inCart(id) > 0); });
+  };
+  const aSend = async (id) => {
+    A.t.delete(id);
+    const inp = document.querySelector('input[data-aqty="' + id + '"]'); if (!inp) return;
+    const qty = aClean(inp); if (qty === inCart(id)) { aPaint(id); return; }
+    A.n.set(id, (A.n.get(id) || 0) + 1);
+    const j = await FC.api('/api/cart/set-many', { items: JSON.stringify([{ id, qty }]), source: 'cart' });   // FC.api -> FC.setCart -> badge + cart popup
+    A.n.set(id, A.n.get(id) - 1);
+    if (!j.cart) FC.toast(j.message || 'Could not update the cart. Please try again.', 'error');
+    else (j.results || []).filter((x) => ['reduced', 'out_of_stock', 'unavailable', 'invalid'].includes(x.status)).forEach((x) => FC.toast((x.name ? x.name + ': ' : '') + x.message, x.status === 'reduced' ? 'info' : 'error'));
+    aPaint(id);
+  };
+  const aLater = (id) => { clearTimeout(A.t.get(id)); A.t.set(id, setTimeout(() => aSend(id), 400)); };
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-astep]'); if (!b) return;
+    const inp = b.parentElement.querySelector('input'); inp.value = Math.max(0, aClean(inp) + +b.dataset.astep); aClean(inp);
+    inp.closest('.qty').classList.toggle('in-cart', +inp.value > 0); aLater(+inp.dataset.aqty);
+  });
+  document.addEventListener('input', (e) => { const i = e.target; if (!i.matches || !i.matches('input[data-aqty]')) return; if (/\D/.test(i.value)) i.value = i.value.replace(/\D/g, ''); if (+i.value > +i.max) { i.value = i.max; FC.toast('Only ' + i.max + ' available for this product.', 'info'); } aLater(+i.dataset.aqty); });
+  document.addEventListener('change', (e) => { const i = e.target; if (!i.matches || !i.matches('input[data-aqty]')) return; aClean(i); i.closest('.qty').classList.toggle('in-cart', +i.value > 0); aLater(+i.dataset.aqty); });
+  document.addEventListener('keydown', (e) => { if (e.target.matches && e.target.matches('input[data-aqty]') && ['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault(); });
+  document.addEventListener('focusin', (e) => { if (e.target.matches && e.target.matches('input[data-aqty]')) e.target.select(); });
+  document.addEventListener('fc:cart', () => document.querySelectorAll('input[data-aqty]').forEach((i) => aPaint(+i.dataset.aqty)));   // cart popup / other page parts changed the cart -> boxes follow
+
+  /* ---------- Products / Home: "minimum order + selected items" bar, filled from the shared cart ---------- */
+  document.addEventListener('fc:cart', (e) => {
+    const bar = document.getElementById('qo-bar'); if (!bar || document.getElementById('qo-body')) return;   // not on the Quick Order page (it has its own script)
+    const c = e.detail, g = (id) => document.getElementById(id), n = c.items.length;
+    const units = c.items.reduce((a, i) => a + i.qty, 0), total = c.items.reduce((a, i) => a + i.line_total, 0);
+    g('qo-n').textContent = n; g('qo-units').textContent = units; g('qo-total').textContent = FC.money(total);
+    const min = Number(c.min_order) || 0, payable = Math.round((c.subtotal - c.discount + Number.EPSILON) * 100) / 100, ok = !!c.meets_min, box = g('qo-min');
+    if (!n || !(min > 0)) box.hidden = true;
+    else {
+      box.hidden = false; box.classList.toggle('ok', ok); g('qo-min-track').hidden = ok;
+      if (ok) g('qo-min-txt').textContent = 'Minimum order reached';
+      else g('qo-min-txt').innerHTML = '<span class="m1">Minimum order</span> <span class="m2">' + FC.money(min) + '</span><span class="m-sep"> · </span><span class="m3">Add ' + FC.money(Math.max(0, min - payable)) + ' more</span>';
+      g('qo-min-fill').style.width = Math.max(0, Math.min(100, payable / min * 100)).toFixed(1) + '%';
+    }
+    bar.classList.toggle('show', n > 0);
+  });
+
   /* ---------- product card interactions ---------- */
   document.addEventListener('click', async (e) => {
     const q = e.target.closest('.qty [data-step]');

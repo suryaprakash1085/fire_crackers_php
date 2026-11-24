@@ -40,7 +40,7 @@ final class ApiController extends Controller {
      *  cart (results + cart summary) so the page can redraw the panel, badge, table inputs and bottom bar from it. */
     public function setMany(): void {
         $this->requireCsrf(true);
-        if (RateLimiter::tooMany('cart_set_many', client_ip(), 120, 600)) $this->json(['ok' => false, 'message' => 'Too many requests. Please slow down.'], 429);
+        if (RateLimiter::tooMany('cart_set_many', client_ip(), 600, 600)) $this->json(['ok' => false, 'message' => 'Too many requests. Please slow down.'], 429);
         RateLimiter::hit('cart_set_many', client_ip());
         $raw = json_decode($this->input('items', '[]'), true);
         if (!is_array($raw) || !$raw) $this->json(['ok' => false, 'message' => 'Nothing to update.', 'cart' => CartService::summary()], 422);

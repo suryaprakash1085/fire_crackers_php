@@ -4,11 +4,11 @@ $brand = setting('brand_name', 'Shop');
 $cols = ['primary' => setting('color_primary', '#E8590C'), 'secondary' => setting('color_secondary', '#7048E8'), 'accent' => setting('color_accent', '#F59F00'), 'bg' => setting('color_bg', '#F8FAFC'), 'text' => setting('color_text', '#1F2937'), 'button' => setting('color_button', '#E8590C'), 'button-text' => setting('color_button_text', '#FFFFFF')];
 $css = ':root{'; foreach ($cols as $k => $v) { if (!valid_hex($v)) continue; $css .= "--c-$k:$v;--c-$k-rgb:" . hex_to_rgb($v) . ';'; } $css .= '}';
 $favicon = setting('favicon'); $logo = company_logo_path();   // Company Profile logo, else the older App Customization logo
-$nav = [['/', 'Home', 'home'], ['/about', 'About Us', 'info'], ['/services', 'Services', 'concierge-bell'], ['/products', 'Products', 'package'], ['/quick-order', 'Quick Order', 'zap'], ['/voice-order', 'Voice Order', 'mic'], ['/contact', 'Contact Us', 'phone'], ['/cart', 'Shopping Cart', 'shopping-cart']];
+$nav = [['/home', 'Home', 'home'], ['/about', 'About Us', 'info'], ['/services', 'Services', 'concierge-bell'], ['/products', 'Products', 'package'], ['/quick-order', 'Quick Order', 'zap'], ['/voice-order', 'Voice Order', 'mic'], ['/contact', 'Contact Us', 'phone'], ['/cart', 'Shopping Cart', 'shopping-cart']];
 $path = '/' . trim(rawurldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)), '/'); if (base_path() !== '' && str_starts_with($path, base_path())) $path = '/' . trim(substr($path, strlen(base_path())), '/');
-$isActive = fn($h) => $h === '/' ? $path === '/' : (str_starts_with($path, $h) || ($h === '/products' && str_starts_with($path, '/product')));
-$drawer = !in_array($path, ['/cart', '/checkout', '/quick-order', '/voice-order', '/order-success'], true);
-$bottom = [['/', 'Home', 'home'], ['/products', 'Products', 'package'], ['/quick-order', 'Quick', 'zap'], ['/voice-order', 'Voice', 'mic'], ['/cart', 'Cart', 'shopping-cart']];
+$isActive = fn($h) => $h === '/' ? $path === '/' : (str_starts_with($path, $h) || ($h === '/quick-order' && $path === '/') || ($h === '/products' && str_starts_with($path, '/product')));
+$drawer = !in_array($path, ['/cart', '/checkout', '/voice-order', '/order-success'], true);
+$bottom = [['/home', 'Home', 'home'], ['/products', 'Products', 'package'], ['/quick-order', 'Quick', 'zap'], ['/voice-order', 'Voice', 'mic'], ['/cart', 'Cart', 'shopping-cart']];
 ?><!doctype html>
 <html lang="en">
 <head>
@@ -45,6 +45,8 @@ $bottom = [['/', 'Home', 'home'], ['/products', 'Products', 'package'], ['/quick
       <?php endforeach; ?>
     </nav>
     <div class="nb-actions">
+      <?php if (App\Services\PriceList::available()): ?><a href="<?= e(url('/price-list')) ?>" class="nb-iconbtn nb-pdf" aria-label="Download price list (PDF)" title="Download Price List (PDF)"><?= icon('file-down', 'w-5 h-5') ?></a><?php endif; ?>
+      <a href="<?= e(url('/cart')) ?>" class="nb-iconbtn nb-cart" <?= $drawer ? 'data-cart-open' : '' ?> aria-label="Shopping cart"><?= icon('shopping-cart', 'w-5 h-5') ?><span data-cart-badge class="hidden" aria-hidden="true">0</span></a>
       <form action="<?= e(url('/products')) ?>" method="get" class="nb-search" role="search"><span class="nb-search-ic"><?= icon('search', 'w-4 h-4') ?></span><input name="q" type="search" placeholder="Search crackers…" aria-label="Search products" class="nb-search-input"></form>
       <a href="<?= e(url('/products?focus=search')) ?>" class="nb-iconbtn nb-search-link" aria-label="Search"><?= icon('search', 'w-5 h-5') ?></a>
       <button type="button" data-nav-toggle aria-expanded="false" aria-controls="mobile-nav" class="nb-iconbtn nb-burger" aria-label="Menu"><?= icon('menu', 'w-6 h-6') ?></button>
@@ -55,6 +57,7 @@ $bottom = [['/', 'Home', 'home'], ['/products', 'Products', 'package'], ['/quick
       <?php foreach ($nav as [$h, $l, $ic]): ?>
         <a href="<?= e(url($h)) ?>" class="nb-mlink<?= $isActive($h) ? ' is-active' : '' ?>"><?= icon($ic, 'w-4 h-4') ?><span><?= e($l) ?></span></a>
       <?php endforeach; ?>
+      <?php if (App\Services\PriceList::available()): ?><a href="<?= e(url('/price-list')) ?>" class="nb-mlink"><?= icon('file-down', 'w-4 h-4') ?><span>Price List (PDF)</span></a><?php endif; ?>
       <a href="<?= e(url('/track')) ?>" class="nb-mlink"><?= icon('truck', 'w-4 h-4') ?><span>Track Order</span></a>
     </div>
   </nav>
@@ -85,6 +88,7 @@ $bottom = [['/', 'Home', 'home'], ['/products', 'Products', 'package'], ['/quick
 <nav class="bottom-nav lg:hidden grid grid-cols-5" aria-label="Quick navigation">
   <?php foreach ($bottom as [$h, $l, $ic]): ?><a href="<?= e(url($h)) ?>" class="<?= $isActive($h) ? 'on' : '' ?>" <?= $h === '/cart' && $drawer ? 'data-cart-open' : '' ?>><span class="relative"><?= icon($ic, 'w-5 h-5') ?><?php if ($h === '/cart'): ?><span data-cart-badge class="hidden absolute -top-1.5 -right-2.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full text-[10px] text-white flex items-center justify-center" style="background:var(--c-primary)">0</span><?php endif; ?></span><?= e($l) ?></a><?php endforeach; ?>
 </nav>
+<?php if (in_array($path, ['/products', '/home'], true)): include __DIR__ . '/../partials/cart-bar.php'; endif; ?>
 <?php if ($drawer): ?>
 <div class="drawer-scrim" data-drawer-close></div>
 <aside class="drawer" id="cart-drawer" aria-label="Shopping cart" aria-hidden="true">
@@ -95,5 +99,6 @@ $bottom = [['/', 'Home', 'home'], ['/products', 'Products', 'package'], ['/quick
 <?php endif; ?>
 <?php $waNum = preg_replace('/\D+/', '', (string)(setting('whatsapp_number') ?: setting('contact_phone'))); if (strlen($waNum) === 10) $waNum = '91' . $waNum; ?>
 <a href="<?= $waNum !== '' ? 'https://wa.me/' . e($waNum) : e(url('/contact')) ?>" <?= $waNum !== '' ? 'target="_blank" rel="noopener"' : '' ?> class="wa-float" data-wa-float aria-label="Chat on WhatsApp"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.52 3.48A11.86 11.86 0 0 0 12.04 0C5.5 0 .19 5.31.19 11.85c0 2.09.55 4.13 1.59 5.93L0 24l6.4-1.68a11.84 11.84 0 0 0 5.64 1.44h.01c6.54 0 11.85-5.31 11.85-11.85 0-3.17-1.23-6.15-3.38-8.43zM12.05 21.75h-.01a9.9 9.9 0 0 1-5.04-1.38l-.36-.21-3.8 1 1.01-3.7-.24-.38a9.87 9.87 0 0 1-1.51-5.23c0-5.45 4.44-9.89 9.9-9.89 2.64 0 5.12 1.03 6.99 2.9a9.82 9.82 0 0 1 2.9 7c0 5.46-4.44 9.89-9.84 9.89zm5.42-7.4c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.14-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.08 1.76-.72 2.01-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35z"/></svg></a>
+<?php if ($drawer): ?><button type="button" class="cart-float" data-cart-open aria-label="Open cart"><?= icon('shopping-cart', 'w-6 h-6') ?><span data-cart-badge class="hidden" aria-hidden="true">0</span></button><?php endif; ?>
 <?php foreach (($GLOBALS["pageScripts"] ?? []) as $s): ?><script src="<?= e(asset($s)) ?>" defer></script><?php endforeach; ?>
 </body></html>
